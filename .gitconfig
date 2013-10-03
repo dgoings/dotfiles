@@ -1,0 +1,24 @@
+[user]
+	name = Dylan Goings
+	email = dylan@dgoings.com
+[mergetool]
+	keepBackup = true
+[alias]
+	st = status
+	ci = commit -m
+	co = checkout
+	br = branch
+	lg = "!source ~/.githelpers && pretty_git_log"
+	pbr = "!source ~/.githelpers && pretty_git_branches"
+	pu = push
+	pl = pull
+	irb = !git rebase -i origin/master
+	mg = merge
+	mgff = merge --ff-only
+	fe = fetch
+	up = !git fetch origin && git rebase origin/master
+	cleanup = !git remote prune origin && git gc && git clean -dfx && git stash clear
+	sub = submodule
+	df = diff --color
+[credential]
+	helper = osxkeychain
