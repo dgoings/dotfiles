@@ -22,3 +22,5 @@
 	df = diff --color
 [credential]
 	helper = osxkeychain
+[push]
+	default = simple
