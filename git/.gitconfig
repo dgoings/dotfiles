@@ -7,9 +7,11 @@
 	st = status
 	ci = commit -m
 	co = checkout
+	coc = !git checkout $1 && git clean -df ui/node_modules/
+	coy = !git checkout $1 && cd ui/ && rm -rf node_modules/ && yarn && :
 	br = branch
 	lg = "!source ~/.githelpers && pretty_git_log"
-	pbr = "!source ~/.githelpers && pretty_git_branches"
+	rb = rebase -i
 	pu = push
 	pl = pull
 	irb = !git rebase -i origin/master
@@ -17,10 +19,11 @@
 	mgff = merge --ff-only
 	fe = fetch
 	up = !git fetch origin && git rebase origin/master
-	cleanup = !git remote prune origin && git gc && git clean -dfx && git stash clear
+	cleanup = !git remote prune origin && git gc && git clean -dfx
 	sub = submodule
 	df = diff --color
 [credential]
 	helper = osxkeychain
 [push]
 	default = simple
+
