@@ -24,3 +24,5 @@
 	helper = osxkeychain
 [push]
 	default = simple
+[core]
+	excludesfile = $HOME/.gitignore_global
