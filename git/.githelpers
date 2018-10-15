@@ -1,4 +1,10 @@
 #!/bin/sh
+# some color constants for esc codes
+RESET='\x1b[0m'
+YELLOW='\x1b[33;1m'
+RED='\x1b[31;1m'
+BLUE='\x1b[34;1m'
+GREEN='\x1b[32;1m'
 
 # pretty_git_log constants
 HASH="%C(red)%h%C(reset)"
@@ -7,17 +13,35 @@ REFS="%C(yellow)%d%C(reset)"
 SUBJECT="%s"
 RELATIVE_COMMIT_TIME="%C(green)%cr%C(reset)"
 
-FORMAT="$HASH $AUTHOR -$REFS $SUBJECT $RELATIVE_COMMIT_TIME"
+# Format variables
+LOG_FORMAT="$HASH $AUTHOR -$REFS $SUBJECT $RELATIVE_COMMIT_TIME"
+
+BRANCH_FORMAT='
+	REF=%(refname:short)
+	AUTHOR=%(authorname)
+	DATE=%(authordate:short)
+	OBJECT=%(objectname:short)
+	SUBJECT=%(subject)
+	echo "* $RED$REF$RESET $BLUE$AUTHOR$RESET $GREEN($DATE)$RESET\n\t$YELLOW$OBJECT$RESET - $SUBJECT"
+'
 
 # Generates a pretty git log, aliased to git-lg
 #
 # Alias usage: git lg [<options>] [<since>..<until>] [[--] <path>...]
 #
 function pretty_git_log() {
-    git log --graph --pretty="tformat:$FORMAT" $* |
+    git log --graph --pretty="tformat:$LOG_FORMAT" $* |
     # Pipe to less, allowing for an insertion point
     # in piping through additional formating (e.g., `column`).
     #
     # Page only if we need to, preserving color and what not.
     less -FXRS
+}
+
+# pretty-print git branches with date, author, description, etc. one cool improvement might be to pass in an int and only show the N most recently updated branches.
+function pretty_git_branches() {
+	eval=`git for-each-ref --shell --format="$BRANCH_FORMAT" \
+	        --sort='*committerdate' \
+	        refs/heads refs/remotes`
+	eval "$eval"
 }
