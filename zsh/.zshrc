@@ -7,7 +7,7 @@ export ZSH=/Users/dylan/.oh-my-zsh
 # Set name of the theme to load. Optionally, if you set this to "random"
 # it'll load a random theme each time that oh-my-zsh is loaded.
 # See https://github.com/robbyrussell/oh-my-zsh/wiki/Themes
-ZSH_THEME="robbyrussell"
+ZSH_THEME="gallifrey"
 
 # Uncomment the following line to use case-sensitive completion.
 # CASE_SENSITIVE="true"
@@ -51,7 +51,10 @@ ZSH_THEME="robbyrussell"
 # Custom plugins may be added to ~/.oh-my-zsh/custom/plugins/
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
-plugins=(git sublime)
+plugins=(git vscode bun deno dotenv macos nvm pip) 
+
+# Custom env file for dotenv plugin 
+ZSH_DOTENV_FILE=.env.local
 
 source $ZSH/oh-my-zsh.sh
 
@@ -113,7 +116,7 @@ alias sl=aps_smart_ls
 function aps_pushd {
   pushd $1 && aps_smart_ls
 }
-alias n=aps_pushd
+alias o=aps_pushd
 
 function aps_popd {
   popd && aps_smart_ls
@@ -142,3 +145,14 @@ function _completemarks {
 
 compctl -K _completemarks jump
 compctl -K _completemarks unmark
+
+# bun completions
+[ -s "/Users/dylan/.bun/_bun" ] && source "/Users/dylan/.bun/_bun"
+
+# bun
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+
+# deno
+export DENO_INSTALL="/Users/dylan/.deno"
+export PATH="$DENO_INSTALL/bin:$PATH"
