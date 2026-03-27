@@ -4,12 +4,16 @@
 [mergetool]
 	keepBackup = true
 [alias]
+	a = add
+	aa = add .
 	st = status
 	ci = commit -m
+	ca = commit --amend --no-edit
 	co = checkout
 	tb = git checkout --track
 	br = branch
 	lg = log --graph --all --topo-order --pretty='format:%h %ai %s%d (%an)'
+	pgl = "!source ~/.githelpers && pretty_git_log"
 	pbr = "!source ~/.githelpers && pretty_git_branches"
 	pu = push
 	pl = pull
@@ -23,9 +27,16 @@
 	helper = osxkeychain
 [push]
 	default = simple
+	autoSetupRemote = true
 [pull]
 	default = rebase
+	rebase = true
+[merge]
+	conflictstyle = zdiff3
 [rebase]
 	autoStash = true
+	autoSquash = true
+[init]
+	defaultBranch = main
 [core]
 	excludesfile = $HOME/.gitignore_global

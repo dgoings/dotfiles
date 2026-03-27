@@ -51,12 +51,13 @@ ZSH_THEME="gallifrey"
 # Custom plugins may be added to ~/.oh-my-zsh/custom/plugins/
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
-plugins=(git vscode bun deno dotenv macos nvm pip) 
+plugins=(git vi-mode vscode bun deno dotenv macos nvm pip direnv jump)
 
 # Custom env file for dotenv plugin 
 ZSH_DOTENV_FILE=.env.local
 
 source $ZSH/oh-my-zsh.sh
+VI_MODE_SET_CURSOR=true
 
 # User configuration
 
@@ -93,6 +94,11 @@ alias reload!='source ~/.zshrc'
 # 10ms for key sequences
 KEYTIMEOUT=1
 
+# butterfish shell alias
+alias bf="butterfish shell"
+
+# jump plugin alias
+alias j=jump
 # colors
 export LSCOLORS="exfxcxdxbxegedabagacad"
 export CLICOLOR=true
@@ -101,6 +107,7 @@ export CLICOLOR=true
 alias ls="ls -hG"
 alias l="ls -a"
 alias ll="ls -la"
+alias x="clear"
 
 function aps_smart_ls {
   clear && pwd
@@ -123,28 +130,20 @@ function aps_popd {
 }
 alias p=aps_popd
 
-# Filesystem marks
-# via http://jeroenjanssens.com/2013/08/16/quickly-navigate-your-filesystem-from-the-command-line.html
-# with some pushd modifications
-export MARKPATH=$HOME/.marks
-function jump {
-    n "$MARKPATH/$1" 2>/dev/null || echo "No such mark: $1"
-}
-function mark {
-    mkdir -p "$MARKPATH"; ln -s "$(pwd)" "$MARKPATH/$1"
-}
-function unmark {
-    rm -i "$MARKPATH/$1"
-}
-function marks {
-    \ls -l "$MARKPATH" | tail -n +2 | sed 's/  / /g' | cut -d' ' -f9- | awk -F ' -> ' '{printf "%-10s -> %s\n", $1, $2}'
-}
-function _completemarks {
-  reply=($(ls $MARKPATH))
+function listening {
+  lsof -i -n -P | grep --color=auto \
+    --exclude-dir={.bzr,CVS,.git,.hg,.svn,.idea,.tox} TCP | \
+    grep --color=auto --exclude-dir={.bzr,CVS,.git,.hg,.svn,.idea,.tox} LISTEN
 }
 
-compctl -K _completemarks jump
-compctl -K _completemarks unmark
+# git
+alias g=git
+
+# python aliases
+alias python=python3
+alias pip=pip3
+alias pyvc="python -m venv .venv/"
+alias pyva="source .venv/bin/activate"
 
 # bun completions
 [ -s "/Users/dylan/.bun/_bun" ] && source "/Users/dylan/.bun/_bun"
@@ -152,7 +151,34 @@ compctl -K _completemarks unmark
 # bun
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
+alias b=bun
 
 # deno
 export DENO_INSTALL="/Users/dylan/.deno"
 export PATH="$DENO_INSTALL/bin:$PATH"
+
+# supabase
+alias sb=supabase
+
+# Android
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME=$HOME/Library/Android/sdk
+export NDK_HOME="$ANDROID_HOME/ndk/$(ls $ANDROID_HOME/ndk | tail -n 1)"
+export PATH=$PATH:$ANDROID_HOME/emulator
+export PATH=$PATH:$ANDROID_HOME/platform-tools
+
+# The following lines have been added by Docker Desktop to enable Docker CLI completions.
+fpath=(/Users/dylan/.docker/completions $fpath)
+autoload -Uz compinit
+compinit
+# End of Docker CLI completions
+
+# Load Angular CLI autocompletion.
+source <(ng completion script)
+
+export WASMTIME_HOME="$HOME/.wasmtime"
+
+export PATH="$WASMTIME_HOME/bin:$PATH"
+
+# Turso
+export PATH="$PATH:/Users/dylan/.turso"
