@@ -26,3 +26,10 @@ abbr --add b bun
 
 # supabase
 abbr --add sb supabase
+
+# bat
+abbr -a --position anywhere -- --help '--help | bat -plhelp'
+abbr -a --position anywhere -- -h '-h | bat -plhelp'
+
+# Typescript
+abbr --add tsc tsgo
