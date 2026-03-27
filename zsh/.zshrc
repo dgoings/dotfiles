@@ -94,9 +94,6 @@ alias reload!='source ~/.zshrc'
 # 10ms for key sequences
 KEYTIMEOUT=1
 
-# butterfish shell alias
-alias bf="butterfish shell"
-
 # jump plugin alias
 alias j=jump
 # colors
