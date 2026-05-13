@@ -25,6 +25,7 @@
     "skill-creator@claude-plugins-official": true
   },
   "effortLevel": "high",
+  "autoUpdatesChannel": "latest",
   "voiceEnabled": true,
   "feedbackSurveyState": {
     "lastShownTime": 1754082161664
