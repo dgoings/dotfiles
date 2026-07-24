@@ -43,7 +43,7 @@ function fish_prompt --description 'Write out the prompt'
             # SSH_AUTH_SOCK is deliberately not checked — macOS sets it locally too.
             set -l user_info
             if set -q SSH_CONNECTION; or set -q SSH_TTY; or set -q SSH_CLIENT
-                        set user_info (set_color -o red)"⇅ $USER@"(prompt_hostname)
+                        set user_info (set_color -o red)"⇅ $USER@"
             else
                         set user_info (set_color green)$USER
             end
