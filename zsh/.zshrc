@@ -143,7 +143,7 @@ alias pyvc="python -m venv .venv/"
 alias pyva="source .venv/bin/activate"
 
 # bun completions
-[ -s "/Users/dylan/.bun/_bun" ] && source "/Users/dylan/.bun/_bun"
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
 
 # bun
 export BUN_INSTALL="$HOME/.bun"
@@ -151,7 +151,7 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 alias b=bun
 
 # deno
-export DENO_INSTALL="/Users/dylan/.deno"
+export DENO_INSTALL="$HOME/.deno"
 export PATH="$DENO_INSTALL/bin:$PATH"
 
 # supabase
@@ -165,7 +165,7 @@ export PATH=$PATH:$ANDROID_HOME/emulator
 export PATH=$PATH:$ANDROID_HOME/platform-tools
 
 # The following lines have been added by Docker Desktop to enable Docker CLI completions.
-fpath=(/Users/dylan/.docker/completions $fpath)
+fpath=($HOME/.docker/completions $fpath)
 autoload -Uz compinit
 compinit
 # End of Docker CLI completions
@@ -175,4 +175,8 @@ export WASMTIME_HOME="$HOME/.wasmtime"
 export PATH="$WASMTIME_HOME/bin:$PATH"
 
 # Turso
-export PATH="$PATH:/Users/dylan/.turso"
+export PATH="$PATH:$HOME/.turso"
+
+# Machine-local config and secrets — not tracked in the dotfiles repo.
+# Keep API keys, credentials, and per-machine overrides here.
+[ -f ~/.zshrc.local ] && source ~/.zshrc.local
