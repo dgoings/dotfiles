@@ -38,9 +38,18 @@ function fish_prompt --description 'Write out the prompt'
             # Disable PWD shortening by default.
             set -q fish_prompt_pwd_dir_length
             or set -lx fish_prompt_pwd_dir_length 0
-        
+
+            # Flag SSH sessions so a remote shell can't be mistaken for a local one.
+            # SSH_AUTH_SOCK is deliberately not checked — macOS sets it locally too.
+            set -l user_info
+            if set -q SSH_CONNECTION; or set -q SSH_TTY; or set -q SSH_CLIENT
+                        set user_info (set_color -o red)"⇅ $USER@"(prompt_hostname)
+            else
+                        set user_info (set_color green)$USER
+            end
+
             set_color -b black
-            printf '%s%s%s%s%s%s%s%s%s%s%s%s%s' (set_color -o white) '❰' (set_color green) $USER (set_color white) '❙' (set_color yellow) (prompt_pwd) (set_color white) $git_info (set_color white) '❱' (set_color white)
+            printf '%s%s%s%s%s%s%s%s%s%s%s%s' (set_color -o white) '❰' $user_info (set_color white) '❙' (set_color yellow) (prompt_pwd) (set_color white) $git_info (set_color white) '❱' (set_color white)
             if test $laststatus -eq 0
                         printf "%s✔%s≻%s " (set_color -o green) (set_color white) (set_color normal)
             else
