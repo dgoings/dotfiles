@@ -12,6 +12,9 @@ abbr --add ll 'ls -lahG'
 # navigation
 abbr --add j jump
 
+# ssh (Tailscale)
+abbr --add ph 'ssh "Dylan Goings"@ao-laptop'
+
 # git
 abbr --add g git
 

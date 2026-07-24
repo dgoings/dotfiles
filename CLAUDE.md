@@ -7,34 +7,40 @@ This repo uses [GNU Stow](https://www.gnu.org/software/stow/) for symlink manage
 To re-symlink everything: `stow */`
 To re-symlink a single package: `stow --restow <package>`
 
+**Always run stow from the repo root.** Stow's default target is the *parent* of the stow
+directory (`~/source/`), not `$HOME`. The repo-local `.stowrc` sets `--target=~` to correct
+this, but it is only read when stow is invoked from this directory. Run stow from anywhere
+else and the symlinks land in the wrong place, silently.
+
+Stow aborts the *entire* package on a single conflict, so a pre-existing real file at a
+target path (e.g. a stock `~/.config/fish/config.fish`) blocks every other link in that
+package. Use `stow -n -v <package>` to preview and surface conflicts; move the offending
+file aside, then stow again.
+
 ## Path Convention
 
 Files must mirror their destination path inside the package directory.
 
-Example: `~/.config/ghostty/config` lives at `ghostty/.config/ghostty/config` in this repo.
+Example: `~/.config/fish/config.fish` lives at `fish/.config/fish/config.fish` in this repo.
 
 ## Packages
 
-| Package    | Destination                      | Notes                                                         |
-|------------|----------------------------------|---------------------------------------------------------------|
-| aerospace  | `~/`                             | AeroSpace tiling window manager                               |
-| btop       | `~/.config/`                     | btop resource monitor — Catppuccin Mocha theme, vim keys      |
-| claude     | `~/.claude/`                     | Claude Code settings, commands, skills, status line script    |
-| ghostty    | `~/.config/`                     | Ghostty terminal emulator                                     |
-| git        | `~/`                             | `.gitconfig`                                                  |
-| home       | `~/`                             | Misc files that live directly in `$HOME`                      |
-| karabiner  | `~/.config/`                     | Karabiner-Elements complex modifications (Caps Lock → Ctrl+B) |
-| lazygit    | `~/Library/Application Support/` | lazygit — Catppuccin Mocha theme, Nerd Font v3 icons          |
-| nvim       | `~/.config/`                     | Neovim — LazyVim starter; extras in `lazyvim.json`            |
-| starship   | `~/.config/`                     | Starship prompt                                               |
-| tmux       | `~/`                             | TPM config — vim-tmux-navigator + Catppuccin Mocha theme      |
-| zsh        | `~/`                             | `.zshrc` and related shell config                             |
+| Package | Destination  | Notes                                                            |
+|---------|--------------|------------------------------------------------------------------|
+| claude  | `~/.claude/` | Claude Code `settings.json` and global `CLAUDE.md`               |
+| fish    | `~/.config/` | fish shell — vi keybinds, abbrs, fisher plugins (fzf, nvm)       |
+| git     | `~/`         | `.gitconfig` and `.githelpers`                                   |
+| tmux    | `~/`         | `.tmux.conf` — `C-g` prefix, vim pane nav, 256-colour status bar |
+| zsh     | `~/`         | `.zshrc` (oh-my-zsh)                                             |
 
-## Cross-Cutting Conventions
+## Conventions
 
-- **Theme**: Catppuccin Mocha across all tools — ghostty, tmux, btop, lazygit, nvim
-- **Navigation**: vim-style keybinds everywhere; `Ctrl-h/j/k/l` bridges nvim↔tmux pane boundaries
-- **Font**: JetBrainsMono Nerd Font (configured in ghostty)
+- **Navigation**: vim-style keybinds — `h/j/k/l` pane movement in tmux, vi mode in both shells
+- **Portability**: use `$HOME`, never a hardcoded `/Users/<name>`. The repo is shared across
+  machines whose usernames differ, and hardcoded paths silently break on the other machine.
+- **Secrets stay out of the repo.** `.zshrc` sources `~/.zshrc.local` if it exists; keep API
+  keys, tokens, and credentials there. It lives in `$HOME`, is not a stow package, and is
+  therefore never tracked.
 
 ## Working in this Repo
 
@@ -48,6 +54,5 @@ When adding new dotfiles:
 
 Setup from scratch: `brew install stow && stow */`
 
-## Tmux IDE Layout (`dev` Command)
-
-Full documentation: [docs/dev-layout.md](docs/dev-layout.md)
+On a machine that already has real config files in place, stow will refuse to overwrite them.
+Move the existing file aside first, then stow — see the conflict note under Architecture.
