@@ -25,6 +25,8 @@
 	df = diff --color
 [credential]
 	helper = osxkeychain
+	helper = 
+	helper = /usr/local/share/gcm-core/git-credential-manager
 [push]
 	default = simple
 	autoSetupRemote = true
@@ -40,3 +42,9 @@
 	defaultBranch = main
 [core]
 	excludesfile = $HOME/.gitignore_global
+[credential "https://github.com"]
+	helper = !/opt/homebrew/bin/gh auth git-credential
+[credential "https://gist.github.com"]
+	helper = !/opt/homebrew/bin/gh auth git-credential
+[credential "https://dev.azure.com"]
+	useHttpPath = true
