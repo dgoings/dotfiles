@@ -33,3 +33,4 @@ abbr -a --position anywhere -- -h '-h | bat -plhelp'
 
 # Typescript
 abbr --add tsc tsgo
+abbr --add wb workbook

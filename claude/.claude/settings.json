@@ -3,7 +3,16 @@
   "env": {
     "ENABLE_LSP_TOOL": "1"
   },
-  "model": "opus[1m]",
+  "permissions": {
+    "allow": [
+      "mcp__pencil"
+    ]
+  },
+  "model": "fable",
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh"
+  },
   "enabledPlugins": {
     "rust-analyzer-lsp@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
@@ -15,8 +24,11 @@
   "effortLevel": "high",
   "autoUpdatesChannel": "latest",
   "tui": "fullscreen",
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": false,
   "voiceEnabled": true,
   "feedbackSurveyState": {
     "lastShownTime": 1754082161664
-  }
+  },
+  "skipWorkflowUsageWarning": true
 }

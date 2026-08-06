@@ -12,7 +12,7 @@
 	co = checkout
 	tb = git checkout --track
 	br = branch
-	lg = log --graph --all --topo-order --pretty='format:%h %ai %s%d (%an)'
+	lg = log --graph --topo-order --pretty='format:%h %ai %s%d (%an)'
 	pgl = "!source ~/.githelpers && pretty_git_log"
 	pbr = "!source ~/.githelpers && pretty_git_branches"
 	pu = push
