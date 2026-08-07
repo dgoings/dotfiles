@@ -13,6 +13,10 @@
 	tb = git checkout --track
 	br = branch
 	lg = log --graph --topo-order --pretty='format:%h %ai %s%d (%an)'
+	# skip-worktree helpers: stop/resume tracking local edits to a tracked file
+	lock = update-index --skip-worktree
+	unlock = update-index --no-skip-worktree
+	locked = !git ls-files -v | grep ^S | cut -c3-
 	pgl = "!source ~/.githelpers && pretty_git_log"
 	pbr = "!source ~/.githelpers && pretty_git_branches"
 	pu = push
