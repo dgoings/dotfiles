@@ -1,0 +1,4 @@
+# Strip harness-written churn (model, effort, survey state) and sort keys before
+# staging, so live Claude Code edits don't dirty the tree or conflict on rebase.
+# Filter is defined in git/.gitconfig as [filter "claude-settings"].
+claude/.claude/settings.json filter=claude-settings

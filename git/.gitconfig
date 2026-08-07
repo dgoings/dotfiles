@@ -48,3 +48,11 @@
 	helper = !/opt/homebrew/bin/gh auth git-credential
 [credential "https://dev.azure.com"]
 	useHttpPath = true
+# Normalizes ~/.claude/settings.json on the way into git. Claude Code rewrites
+# that file live (model, effort, survey timestamps, key order), which made every
+# rebase in the dotfiles repo conflict. -S sorts keys to kill reorder churn; the
+# deleted keys are per-machine preferences that shouldn't be shared.
+# Activated by .gitattributes in the dotfiles repo.
+[filter "claude-settings"]
+	clean = jq -S 'del(.model, .effortLevel, .feedbackSurveyState)'
+	smudge = cat
