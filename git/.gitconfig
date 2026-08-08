@@ -60,3 +60,9 @@
 [filter "claude-settings"]
 	clean = jq -S 'del(.model, .effortLevel, .feedbackSurveyState)'
 	smudge = cat
+# Machine-local git config — not tracked in the dotfiles repo.
+# Must stay last: settings here override everything above, and an empty
+# credential.helper resets the accumulated helper list. Silently ignored
+# when the file doesn't exist.
+[include]
+	path = ~/.gitconfig.local
