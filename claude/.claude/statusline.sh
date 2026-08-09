@@ -13,6 +13,20 @@ week=$(jq -r '.rate_limits.seven_day.used_percentage // empty' <<<"$input")
 reset=$(jq -r '.rate_limits.five_hour.resets_at // empty' <<<"$input")
 week_reset=$(jq -r '.rate_limits.seven_day.resets_at // empty' <<<"$input")
 
+# Elapsed share of a rate-limit window, rendered dim as "/N%" after the usage
+# figure -- the pace reference: where usage would sit if the whole allowance
+# were burned evenly across the window. Usage above it is running hot; below
+# it is banked room. Args: window length in seconds, resets_at epoch.
+# Prints nothing when resets_at is absent (before the first API response).
+pace() {
+  local len=$1 resets=$2 elapsed
+  [[ "$resets" =~ ^[0-9]+$ ]] || return 0
+  elapsed=$(((len - (resets - $(date +%s))) * 100 / len))
+  [ "$elapsed" -lt 0 ] && elapsed=0
+  [ "$elapsed" -gt 100 ] && elapsed=100
+  printf '\033[2m/%s%%\033[0m' "$elapsed"
+}
+
 # Colorize a used-percentage: green < 50, yellow < 80, red >= 80.
 pct() {
   local n
@@ -188,11 +202,12 @@ if [[ "$week" =~ ^[0-9.]+$ ]]; then
 fi
 
 out="${model:-Claude}"
-[ -n "$five" ] && out+=" | 5h $(pct "$five")"
+[ -n "$five" ] && out+=" | 5h $(pct "$five")$(pace 18000 "$reset")"
 if [[ "$reset" =~ ^[0-9]+$ ]]; then
   out+=" (resets $(date -r "$reset" +%H:%M))"
 fi
-[ -n "$week" ] && out+=" | 7d $(pct "$week")"
+# The Fable bar shares the 7d window, so this pace reference covers it too.
+[ -n "$week" ] && out+=" | 7d $(pct "$week")$(pace 604800 "$week_reset")"
 # Tilde marks this as a local estimate, not a figure the API reported.
 case $fable in
 '' | 0 | *[!0-9]*) ;;
