@@ -27,7 +27,7 @@ Example: `~/.config/fish/config.fish` lives at `fish/.config/fish/config.fish` i
 
 | Package | Destination  | Notes                                                            |
 |---------|--------------|------------------------------------------------------------------|
-| claude  | `~/.claude/` | Claude Code `settings.json` and global `CLAUDE.md`               |
+| claude  | `~/.claude/` | Claude Code `settings.json`, `statusline.sh`, and global `CLAUDE.md` |
 | fish    | `~/.config/` | fish shell — vi keybinds, abbrs, fisher plugins (fzf, nvm)       |
 | git     | `~/`         | `.gitconfig` and `.githelpers`                                   |
 | tmux    | `~/`         | `.tmux.conf` — `C-g` prefix, vim pane nav, 256-colour status bar |
