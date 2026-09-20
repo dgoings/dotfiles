@@ -2,7 +2,7 @@ function fish_prompt --description 'Write out the prompt'
             set -l laststatus $status
         
             set -l git_info
-            if git rev-parse 2>/dev/null
+            if git rev-parse --is-inside-work-tree 2>/dev/null | string match -q true
                         set -l git_branch (
                                     command git symbolic-ref HEAD 2>/dev/null | string replace 'refs/heads/' ''
                                     or command git describe HEAD 2>/dev/null
