@@ -16,9 +16,15 @@ set --universal nvm_default_version 25
 set -gx PNPM_HOME "$HOME/Library/pnpm"
 fish_add_path -g $PNPM_HOME/bin
 
-# Java (Android Studio's bundled JBR)
+# Java — prefer Homebrew's JDK 21: Gradle 8.x (the Android build) can't run
+# on Android Studio's bundled JBR once that hit Java 25 (the ":buildSrc >
+# 25.0.2" failure). Fall back to the JBR only if the brew JDK is missing.
+set -l jdk21 "/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
 set -l jbr "/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-if test -d $jbr
+if test -d $jdk21
+  set -gx JAVA_HOME $jdk21
+  fish_add_path -g $JAVA_HOME/bin
+else if test -d $jbr
   set -gx JAVA_HOME $jbr
   fish_add_path -g $JAVA_HOME/bin
 end

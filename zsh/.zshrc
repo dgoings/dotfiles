@@ -157,8 +157,8 @@ export PATH="$DENO_INSTALL/bin:$PATH"
 # supabase
 alias sb=supabase
 
-# Android
-export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+# Android — JDK 21 (Gradle 8.x can't run on Android Studio's JBR ≥ Java 25)
+export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
 export ANDROID_HOME=$HOME/Library/Android/sdk
 export NDK_HOME="$ANDROID_HOME/ndk/$(ls $ANDROID_HOME/ndk | tail -n 1)"
 export PATH=$PATH:$ANDROID_HOME/emulator
