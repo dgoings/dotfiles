@@ -8,6 +8,7 @@ Personal dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow/).
 | -------- | ------------------------------------------------------- |
 | `claude` | Claude Code `settings.json` and global `CLAUDE.md`      |
 | `fish`   | fish shell — vi keybinds, abbreviations, fisher plugins |
+| `ghostty`| Ghostty terminal — Abernathy theme, JuliaMono font      |
 | `git`    | `.gitconfig` and `.githelpers`                          |
 | `tmux`   | `.tmux.conf` — `C-g` prefix, vim pane navigation        |
 | `zsh`    | `.zshrc` (oh-my-zsh)                                    |
@@ -17,6 +18,7 @@ Personal dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow/).
 ```sh
 # Prerequisites
 brew install stow
+brew install --cask font-juliamono   # font used by the ghostty package
 
 # Clone
 git clone https://github.com/dgoings/dotfiles.git ~/source/dotfiles

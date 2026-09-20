@@ -29,6 +29,7 @@ Example: `~/.config/fish/config.fish` lives at `fish/.config/fish/config.fish` i
 |---------|--------------|------------------------------------------------------------------|
 | claude  | `~/.claude/` | Claude Code `settings.json`, `statusline.sh`, and global `CLAUDE.md` |
 | fish    | `~/.config/` | fish shell — vi keybinds, abbrs, fisher plugins (fzf, nvm)       |
+| ghostty | `~/Library/Application Support/com.mitchellh.ghostty/` | Ghostty — Abernathy theme, JuliaMono font (`brew install --cask font-juliamono`) |
 | git     | `~/`         | `.gitconfig` and `.githelpers`                                   |
 | tmux    | `~/`         | `.tmux.conf` — `C-g` prefix, vim pane nav, 256-colour status bar |
 | zsh     | `~/`         | `.zshrc` (oh-my-zsh)                                             |
