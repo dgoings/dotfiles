@@ -82,26 +82,21 @@ pct() {
 # make the correction factor noisy.
 #
 # Calibration log ($200 Max plan; promo status unverified):
-#   2026-08-08  7d ~4.2%, Fable 4%, local ratio 0.650 -> implied 0.68
-#               (rounding bounds 0.57-0.78). Set 0.65 provisionally.
-#   2026-08-08  later same day: 7d 6%, Fable 4%, local ratio 0.703 ->
-#               implied 1.05 (bounds 0.86-1.31), centered on 1.0. Also the
-#               global bar ratio (4/6 = 0.667) matched the local spend ratio
-#               within rounding -- evidence that on this plan the Fable bar
-#               shares the SAME weekly allowance as the all-models bar (no
-#               separate sub-limit), i.e. fable% = 7d% x spend ratio exactly.
-#               Set 1.0. If a future reading disagrees, the sub-limit story
-#               is wrong, not just the number.
-#   2026-08-08  third reading: 7d 7%, Fable 5%, local ratio 0.718 -> implied
-#               1.01 (bounds 0.85-1.20); local ratio matched the bar ratio
-#               (0.714) to three decimals. Shared-allowance model confirmed.
-#   2026-08-08  post-5h-reset, larger bars: 7d 13%, Fable 9%, local ratio
-#               0.738 -> implied 1.07 (bounds 0.97-1.17). Rendered ~10% vs
-#               actual 9%; the 1-point overshoot is local mix skew (local
-#               0.738 vs global 0.692), the documented residual -- not the
-#               constant. Verified; minutes later /usage ticked to 10%,
-#               matching the rendered estimate exactly.
-FABLE_SHARE=1.0 # Fable bar shares the weekly allowance ($200 Max)
+#   2026-08-08  Four readings that day implied a share near 1.0, i.e. the
+#               Fable bar sharing the weekly allowance outright. All four are
+#               void: the scan was summing duplicate rows (see the dedup note
+#               in the awk below), and the duplication was heavier on Fable
+#               than on the rest, so the local ratio was inflated by a factor
+#               that drifted with how often sessions were resumed. Every
+#               constant fitted before the dedup fix encodes that drift.
+#   2026-08-11  First reading after deduplicating: 7d 44%, Fable 36%, local
+#               ratio 0.327 -> implied 0.40 (rounding bounds 0.39-0.41).
+#               The bars were large enough that rounding leaves little slack,
+#               so this is the first calibration worth trusting. Note the
+#               local ratio (0.327) and the bar ratio (36/44 = 0.818) are far
+#               apart, which is the sub-limit doing real work -- the earlier
+#               "shared allowance" conclusion was an artifact of the bug.
+FABLE_SHARE=0.40 # Fable sub-limit as a fraction of the weekly allowance
 
 # Start of the current weekly window. Preferred source is the reset timestamp
 # the API itself reports, so the local scan covers the same span as the 7d
@@ -159,7 +154,7 @@ if [ -z "$all_cost" ]; then
       | select(.type == "assistant")
       | select((.timestamp // "") | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601? // 0 | . >= $since)
       | (.message.usage // {}) as $u
-      | [ (.message.model // "unknown"),
+      | [ (.message.id // "?"), (.message.model // "unknown"),
           ($u.input_tokens // 0), ($u.output_tokens // 0), ($u.cache_read_input_tokens // 0),
           ($u.cache_creation.ephemeral_5m_input_tokens // 0),
           ($u.cache_creation.ephemeral_1h_input_tokens // 0) ] | @tsv
@@ -180,12 +175,30 @@ if [ -z "$all_cost" ]; then
           i["sonnet"]=3;  o["sonnet"]=15; r["sonnet"]=0.3; w5["sonnet"]=3.75; w1["sonnet"]=6
           i["haiku"]=1;   o["haiku"]=5;   r["haiku"]=0.1;  w5["haiku"]=1.25; w1["haiku"]=2
         }
-        { f = family($1)
-          c = ($2*i[f] + $3*o[f] + $4*r[f] + $5*w5[f] + $6*w1[f]) / 1e6
-          all += c; if (f == "fable") fab += c }
+        # One API response can appear many times: streaming writes a row per
+        # progress snapshot, and resuming or forking a session copies the whole
+        # transcript into a new file. Both share .message.id, so key on it.
+        #
+        # Snapshots of one response repeat identical input and cache counts
+        # while output_tokens grows, so summing rows inflates cache reads (the
+        # dominant term) by the row count and counts partial output repeatedly.
+        # Take input and cache once; take the largest output, which is the
+        # final value the response settled on.
+        { id = $1
+          if (!(id in seen)) {
+            seen[id] = 1; fam[id] = family($2)
+            ti[id] = $3; to[id] = $4; tr[id] = $5; t5[id] = $6; t1[id] = $7
+          } else if ($4 + 0 > to[id] + 0) to[id] = $4 }
         # Trailing newline matters: `read` reports failure on an unterminated
         # line even after assigning, which would zero both costs below.
-        END { printf "%.4f %.4f\n", fab, all }') || { fable_cost=0; all_cost=0; }
+        END {
+          for (id in seen) {
+            f = fam[id]
+            c = (ti[id]*i[f] + to[id]*o[f] + tr[id]*r[f] + t5[id]*w5[f] + t1[id]*w1[f]) / 1e6
+            all += c; if (f == "fable") fab += c
+          }
+          printf "%.4f %.4f\n", fab, all
+        }') || { fable_cost=0; all_cost=0; }
   fi
   # stderr is redirected first so a failed open on $cache stays quiet too;
   # bash applies redirections left to right and reports the failure itself.
