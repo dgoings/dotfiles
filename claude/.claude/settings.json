@@ -11,6 +11,7 @@
     "typescript-lsp@claude-plugins-official": true
   },
   "env": {
+    "CLAUDE_CODE_PLUGIN_DIRS": "~/.claude/mods/usage-line",
     "ENABLE_LSP_TOOL": "1"
   },
   "inputNeededNotifEnabled": true,
@@ -20,10 +21,6 @@
     ]
   },
   "skipWorkflowUsageWarning": true,
-  "statusLine": {
-    "command": "~/.claude/statusline.sh",
-    "type": "command"
-  },
   "tui": "fullscreen",
   "voiceEnabled": true
 }

@@ -1,1 +1,5 @@
 .DS_Store
+
+# Laid by the engine beside a loaded Claude Code mod: this build's type declarations and a tsconfig.
+claude/.claude/mods/*/.claude-plugin/types/
+claude/.claude/mods/*/tsconfig.json

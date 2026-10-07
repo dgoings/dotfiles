@@ -1,0 +1,17 @@
+{
+  "name": "usage-line",
+  "version": "0.1.0",
+  "description": "Model, 5h and 7d rate-limit usage with pace references, and an estimated Fable share of the weekly limit, in the band above the prompt.",
+  "author": {
+    "name": "Dylan Goings"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "fableShare": {
+      "type": "string",
+      "title": "Fable share",
+      "description": "The Fable sub-limit as a fraction of the plan's weekly allowance (see README for the calibration recipe).",
+      "default": "0.40"
+    }
+  }
+}

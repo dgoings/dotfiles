@@ -27,7 +27,7 @@ Example: `~/.config/fish/config.fish` lives at `fish/.config/fish/config.fish` i
 
 | Package | Destination  | Notes                                                            |
 |---------|--------------|------------------------------------------------------------------|
-| claude  | `~/.claude/` | Claude Code `settings.json`, `statusline.sh`, and global `CLAUDE.md` |
+| claude  | `~/.claude/` | Claude Code `settings.json`, global `CLAUDE.md`, and `mods/usage-line` (see below) |
 | fish    | `~/.config/` | fish shell — vi keybinds, abbrs, fisher plugins (fzf, nvm)       |
 | ghostty | `~/Library/Application Support/com.mitchellh.ghostty/` | Ghostty — Abernathy theme, JuliaMono font (`brew install --cask font-juliamono`) |
 | git     | `~/`         | `.gitconfig` and `.githelpers`                                   |
@@ -42,6 +42,17 @@ Example: `~/.config/fish/config.fish` lives at `fish/.config/fish/config.fish` i
 - **Secrets stay out of the repo.** `.zshrc` sources `~/.zshrc.local` if it exists; keep API
   keys, tokens, and credentials there. It lives in `$HOME`, is not a stow package, and is
   therefore never tracked.
+
+## Claude Code usage-line mod
+
+`claude/.claude/mods/usage-line/` is a Claude Code mod (a plugin of function hooks) that
+draws the model, the 5h/7d rate-limit usage with pace references, and an estimated Fable
+share of the weekly limit in the band above the prompt. It replaced the old
+`statusline.sh`. `settings.json` loads it through `env.CLAUDE_CODE_PLUGIN_DIRS`; edits
+hot-reload in a running interactive session. Its README holds the Fable calibration notes.
+Check it with `claude plugin validate` and `claude plugin test` from the mod folder. The
+engine lays `.claude-plugin/types/` and a `tsconfig.json` beside a loaded mod; both are
+gitignored.
 
 ## Claude Code settings.json drift
 
