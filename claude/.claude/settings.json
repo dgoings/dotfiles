@@ -14,6 +14,20 @@
     "CLAUDE_CODE_PLUGIN_DIRS": "~/.claude/mods/usage-line",
     "ENABLE_LSP_TOOL": "1"
   },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "bash \"$HOME/.claude/hooks/herdr-agent-state.sh\" session",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ]
+  },
   "inputNeededNotifEnabled": true,
   "permissions": {
     "allow": [
