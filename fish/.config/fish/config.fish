@@ -35,3 +35,11 @@ end
 set -gx ANDROID_HOME "$HOME/Library/Android/sdk"
 set -gx ANDROID_SDK_ROOT $ANDROID_HOME
 fish_add_path $ANDROID_HOME/platform-tools $ANDROID_HOME/emulator $ANDROID_HOME/cmdline-tools/latest/bin
+
+# direnv — generate the hook at startup so it always matches the installed version
+if type -q direnv
+  direnv hook fish | source
+end
+# >>> workbench app PATH >>>
+fish_add_path -g --append "$HOME/Library/Application Support/Workbench/bin"
+# <<< workbench app PATH <<<
