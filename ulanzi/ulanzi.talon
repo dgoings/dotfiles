@@ -1,0 +1,26 @@
+# Ulanzi AU05: global controls + defaults for any app without its own file.
+#
+# Ulanzi Studio setup: ONE preset, no per-app presets. Each control sends:
+#   Voice key        ctrl+opt+shift+cmd+V   dictation (Talon sleeps meanwhile)
+#   Talon key        ctrl+opt+shift+cmd+T   Talon wake/sleep toggle
+#   Key 3            ctrl+opt+shift+cmd+B   "back / cancel"
+#   Knob left        ctrl+opt+shift+cmd+J   "move up / previous"
+#   Knob right       ctrl+opt+shift+cmd+L   "move down / next"
+#   Knob press       ctrl+opt+shift+cmd+K   "confirm"
+#
+# What B/J/K/L do per app lives in ulanzi_apps.py (defaults in ulanzi.py).
+# `mode: all` keeps every control working while Talon is asleep or you're
+# dictating.
+mode: all
+-
+
+key(ctrl-alt-shift-cmd-v): user.ulanzi_dictation_toggle()
+key(ctrl-alt-shift-cmd-t): user.ulanzi_toggle()
+key(ctrl-alt-shift-cmd-b): user.ulanzi_back()
+key(ctrl-alt-shift-cmd-j): user.ulanzi_knob_left()
+key(ctrl-alt-shift-cmd-l): user.ulanzi_knob_right()
+key(ctrl-alt-shift-cmd-k): user.ulanzi_knob_press()
+
+settings():
+    # On-screen dot showing whether Talon is awake or asleep.
+    user.mode_indicator_show = true
