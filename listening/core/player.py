@@ -141,6 +141,24 @@ class Player:
             return [Listen()]
         return self._finish_item(reply)
 
+    def next_text(self) -> str | None:
+        """What the next section will be spoken as, so the glue can render it
+        ahead: the text section_finished() (or the continue after it) would
+        Speak right now. None if nothing would play next. Changes nothing."""
+        if self.phase != "speaking" or self._notice or self.key is None:
+            return None
+        awaited = self._awaited_reply(self.key)
+        if awaited is not None:
+            return self._section_text(awaited, 0) if awaited.sections else None
+        reply = self._reply()
+        if reply is not None and self.index < len(reply.sections):
+            return self._section_text(reply, self.index)
+        state = self.store.session(self.key)
+        walkthrough = self._walkthrough_left(state)
+        if self._returns_to(walkthrough, reply):
+            return self._section_text(walkthrough, state.walkthrough_pos, BACK_TO_WALKTHROUGH)
+        return None
+
     def respond_started(self, focused_key: str | None = None) -> list[Effect]:
         key = focused_key or self.key
         if key is not None:
@@ -236,9 +254,7 @@ class Player:
         reply = self._reply()
         if reply is None or not 0 <= index < len(reply.sections):
             return self._finish_item(reply)
-        text = prefix + reply.sections[index].text
-        if index == len(reply.sections) - 1 and self._nothing_follows(reply):
-            text += EVERYTHING
+        text = self._section_text(reply, index, prefix)
         if reply.kind == "walkthrough":
             state = self.store.session(reply.session_key)
             if state.walkthrough == reply.id:
@@ -249,13 +265,26 @@ class Player:
         self.index, self.last_played = index + 1, index
         return [Deafen(), Speak(text)]
 
+    def _section_text(self, reply: Reply, index: int, prefix: str = "") -> str:
+        """Section `index` as spoken: with the prefix, and " That's everything."
+        on the last section when nothing follows."""
+        text = prefix + reply.sections[index].text
+        if index == len(reply.sections) - 1 and self._nothing_follows(reply):
+            text += EVERYTHING
+        return text
+
+    @staticmethod
+    def _returns_to(walkthrough: Reply | None, reply: Reply | None) -> bool:
+        """Finishing `reply` goes back to `walkthrough` (one with sections left)."""
+        return walkthrough is not None and (reply is None or reply.kind == "reply")
+
     def _finish_item(self, reply: Reply | None) -> list[Effect]:
         """The current item has no sections left: return to the walkthrough after a
         reply, otherwise end playback."""
         state = self.store.session(self.key) if self.key else None
         if state is not None:
             walkthrough = self._walkthrough_left(state)
-            if walkthrough is not None and (reply is None or reply.kind == "reply"):
+            if self._returns_to(walkthrough, reply):
                 self.reply_id = walkthrough.id
                 return self._play(state.walkthrough_pos, BACK_TO_WALKTHROUGH)
             if state.walkthrough and (walkthrough is None or state.walkthrough == reply.id):
@@ -266,17 +295,20 @@ class Player:
 
     def _take_awaited(self, key: str | None) -> list[Effect] | None:
         """Play the answer Dylan is waiting for, if it has arrived."""
-        if key is None:
+        if key is None or self._awaited_reply(key) is None:
             return None
         state = self.store.session(key)
-        if not (state.awaiting_response and state.unheard):
-            return None
-        if self.store.load_reply(state.unheard) is None:
-            return None
         state.awaiting_response = False
         self.store.save_session(state)
         self.phase = "idle"
         return self.go_ahead(key)
+
+    def _awaited_reply(self, key: str) -> Reply | None:
+        """The answer Dylan is waiting for in session `key`, if it has arrived."""
+        state = self.store.session(key)
+        if not (state.awaiting_response and state.unheard):
+            return None
+        return self.store.load_reply(state.unheard)
 
     def _speak_notice(self, line: str) -> list[Effect]:
         if not self._notice:

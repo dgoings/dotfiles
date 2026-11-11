@@ -15,6 +15,7 @@ import re
 import signal
 import subprocess
 import threading
+from pathlib import Path
 
 from talon import Module, actions, app, cron, scope, settings, ui
 
@@ -25,17 +26,40 @@ from .core.store import Store
 mod = Module()
 mod.mode("listening", "Listening mode: only the listening commands are active")
 mod.setting(
+    "listening_engine",
+    type=str,
+    default="kokoro",
+    desc='Listening mode voice engine: "kokoro" (falls back to the Mac voice) or "say"',
+)
+mod.setting(
+    "listening_kokoro_voice",
+    type=str,
+    default="bf_isabella",
+    desc="Kokoro voice for listening mode",
+)
+mod.setting(
+    "listening_kokoro_speed",
+    type=float,
+    default=1.0,
+    desc="Kokoro speaking speed for listening mode (1.0 is normal)",
+)
+mod.setting(
     "listening_voice",
     type=str,
     default="",
-    desc="macOS voice for listening mode (empty: best installed voice)",
+    desc="macOS voice for listening mode and the Kokoro fallback (empty: best installed voice)",
 )
 mod.setting(
     "listening_rate",
     type=int,
     default=190,
-    desc="Listening mode speaking rate, in words per minute",
+    desc="Mac voice speaking rate for listening mode, in words per minute",
 )
+
+# Kokoro runs out of process, in its own Python 3.14 venv (.listening/tts/setup.sh).
+_TTS_DIR = Path(__file__).resolve().parent.parent / ".listening" / "tts"
+KOKORO_PYTHON = _TTS_DIR / "venv" / "bin" / "python"
+KOKORO_SAY = _TTS_DIR / "kokoro_say.py"
 
 VOICES = ["Zoe (Premium)", "Ava (Premium)", "Evan (Premium)", "Samantha"]
 FALLBACK_VOICE = "Samantha"
@@ -209,25 +233,88 @@ class _FailedSay:
         pass
 
 
+def _say_command(text: str) -> list[str]:
+    return ["say", "-v", _voice(), "-r", str(settings.get("user.listening_rate")), text]
+
+
+def _kokoro_command(mode: str, text: str) -> list[str] | None:
+    """kokoro_say.py with `mode` ("--play" or "--render-only"), or None when
+    the engine is "say" or Kokoro isn't set up."""
+    if settings.get("user.listening_engine") != "kokoro":
+        return None
+    if not (KOKORO_PYTHON.exists() and KOKORO_SAY.exists()):
+        return None
+    return [
+        str(KOKORO_PYTHON),
+        str(KOKORO_SAY),
+        mode,
+        "--voice",
+        settings.get("user.listening_kokoro_voice"),
+        "--speed",
+        str(settings.get("user.listening_kokoro_speed")),
+        "--fallback-voice",
+        _voice(),
+        "--rate",
+        str(settings.get("user.listening_rate")),
+        "--",
+        text,
+    ]
+
+
 def _speak(text: str) -> None:
+    """Start speaking `text`. With Kokoro, the process is kokoro_say.py --play,
+    which renders and then becomes afplay (or `say` if Kokoro fails) under the
+    same PID, so it's tracked and killed exactly like a `say`."""
     global _say, _say_generation
     _stop_speech()
     _say_generation = _generation
-    try:
-        _say = subprocess.Popen(
-            ["say", "-v", _voice(), "-r", str(settings.get("user.listening_rate")), text],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception as e:
-        _log(f"say failed to start: {e!r}")
+    kokoro = _kokoro_command("--play", text)
+    for command in ([kokoro] if kokoro else []) + [_say_command(text)]:
+        try:
+            _say = subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            break
+        except Exception as e:
+            _log(f"{os.path.basename(command[0])} failed to start: {e!r}")
+    else:
         _say = _FailedSay()
         return
     try:
         _SAY_PID.write_text(str(_say.pid))
     except OSError:
         pass
+    if kokoro:
+        _prefetch()
+
+
+_prefetcher = None  # the running kokoro_say.py --render-only, if any
+
+
+def _prefetch() -> None:
+    """Render the next section in the background while this one plays, so
+    "continue" starts at once. Never waits; at most one at a time."""
+    global _prefetcher
+    try:
+        if _prefetcher is not None and _prefetcher.poll() is None:
+            return  # still rendering the last one
+        _prefetcher = None
+        text = player.next_text()
+        command = _kokoro_command("--render-only", text) if text else None
+        if command is None:
+            return
+        _prefetcher = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as e:
+        _log(f"prefetch failed: {e!r}")
 
 
 def _stop_speech() -> None:
@@ -368,24 +455,35 @@ def _intercept(control: str) -> bool:
 # --- load-time recovery ------------------------------------------------------
 
 
+def _is_speech_process(ps_line: str) -> bool:
+    """A `ps -o comm=,args=` line for our speech: `say`, `afplay` (what
+    kokoro_say.py becomes), or kokoro_say.py itself while it renders. ps cuts
+    comm to 16 characters, so the args are checked too."""
+    comm, _, args = ps_line.strip().partition(" ")
+    names = {os.path.basename(comm), os.path.basename(args.split(" ", 1)[0])}
+    if names & {"say", "afplay"}:
+        return True
+    return "kokoro_say.py" in args and "python" in ps_line.lower()
+
+
 def _kill_orphaned_say() -> None:
-    """A reload loses the previous module's `say` process; silence it."""
+    """A reload loses the previous module's speech process; silence it."""
     try:
         pid = int(_SAY_PID.read_text().strip())
     except (OSError, ValueError):
         return
     _SAY_PID.unlink(missing_ok=True)
     try:
-        comm = subprocess.run(
-            ["ps", "-p", str(pid), "-o", "comm="],
+        line = subprocess.run(
+            ["ps", "-o", "comm=,args=", "-p", str(pid)],
             capture_output=True,
             text=True,
             timeout=2,
-        ).stdout.strip()
-        if os.path.basename(comm) == "say":
+        ).stdout
+        if _is_speech_process(line):
             os.kill(pid, signal.SIGTERM)
     except Exception as e:
-        _log(f"stopping old say failed: {e!r}")
+        _log(f"stopping old speech failed: {e!r}")
 
 
 def _recover_after_load() -> None:

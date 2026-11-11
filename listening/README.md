@@ -60,4 +60,12 @@ Ask Claude to "walk me through", "talk me through", "read me" or "listen to" a d
 
 ## Voice
 
-Built-in Mac voice. Preference order: Zoe (Premium), Ava (Premium), Evan (Premium), then Samantha. To get a Premium voice: System Settings, Accessibility, Spoken Content, System Voice, Manage Voices, then download one (e.g. Zoe) with the Premium variant. Override with the Talon setting `user.listening_voice`; speed is `user.listening_rate` (default 190 words per minute).
+Listening mode speaks with Kokoro, a local text-to-speech model, in the voice Isabella (`bf_isabella`, British). Every spoken line uses it. While one section plays, the next one renders in the background, so "continue" starts at once; only the first section of a reply waits, about 2 to 3 seconds. Set it up once (idempotent; downloads about 340 MB of model files):
+
+    ~/.talon/user/dylan/.listening/tts/setup.sh
+
+This creates `.listening/tts/venv` with Python 3.14 (Kokoro has no wheels for 3.15 yet) and puts the models in `~/.local/share/talon-listening/kokoro`. Rendered audio is cached in `~/.cache/talon-listening/tts` (newest 200 kept). Kokoro needs Homebrew's `espeak-ng`: `brew uninstall espeak-ng` would quietly switch listening mode back to the Mac voice.
+
+Talon settings: `user.listening_engine` (`"kokoro"`, the default, or `"say"` for the Mac voice only), `user.listening_kokoro_voice` (default `bf_isabella`), `user.listening_kokoro_speed` (default 1.0).
+
+If Kokoro isn't set up or fails, the line is spoken with the Mac voice instead, so it never goes silent. Mac voice preference order: Zoe (Premium), Ava (Premium), Evan (Premium), then Samantha. To get a Premium voice: System Settings, Accessibility, Spoken Content, System Voice, Manage Voices, then download one (e.g. Zoe) with the Premium variant. Override with the Talon setting `user.listening_voice`; speed is `user.listening_rate` (default 190 words per minute).

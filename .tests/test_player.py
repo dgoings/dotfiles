@@ -577,3 +577,86 @@ def test_knob_while_speaking_acts_whichever_tab_is_in_front(store):
     p = waiting_on_section_two(store)
     p.continue_(KEY)  # section 2 speaking
     assert p.skip(OTHER) == [StopSpeech(), Deafen(), Speak("three That's everything.")]
+
+
+# --- next_text (what to render ahead) ----------------------------------------
+
+
+def spoken(effects):
+    [text] = [e.text for e in effects if isinstance(e, Speak)]
+    return text
+
+
+def test_next_text_mid_reply(store):
+    add_unheard(store, KEY, ["one", "two", "three"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    assert p.next_text() == "two"
+    assert p.next_text() == "two"  # pure: asking twice changes nothing
+    assert (p.phase, p.index, p.last_played) == ("speaking", 1, 0)
+    p.section_finished()
+    assert p.continue_() == play("two")
+
+
+def test_next_text_last_section_is_none(store):
+    add_unheard(store, KEY, ["one", "two"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    p.section_finished()
+    p.continue_()
+    assert p.next_text() is None
+    assert p.section_finished() == [Listen()]
+    assert p.next_text() is None  # idle
+
+
+def test_next_text_includes_back_to_walkthrough_prefix(store):
+    add_walkthrough(store, KEY, ["w1", "w2", "w3"], pos=1)
+    add_unheard(store, KEY, ["answer"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    assert p.next_text() == "Back to the walkthrough. w2"
+    assert store.session(KEY).walkthrough_pos == 1  # pure
+    assert spoken(p.section_finished()) == "Back to the walkthrough. w2"
+
+
+def test_next_text_includes_thats_everything_suffix(store):
+    add_unheard(store, KEY, ["one", "two"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    assert p.next_text() == "two That's everything."
+    p.section_finished()
+    assert spoken(p.continue_()) == "two That's everything."
+
+
+def test_next_text_resuming_last_walkthrough_section(store):
+    add_walkthrough(store, KEY, ["w1", "w2"], pos=1)
+    add_unheard(store, KEY, ["answer"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    assert p.next_text() == "Back to the walkthrough. w2 That's everything."
+    assert spoken(p.section_finished()) == "Back to the walkthrough. w2 That's everything."
+
+
+def test_next_text_awaited_answer(store):
+    add_unheard(store, KEY, ["one", "two"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    state = store.session(KEY)
+    state.awaiting_response = True
+    store.save_session(state)
+    add_unheard(store, KEY, ["the answer"])
+    assert p.next_text() == "the answer That's everything."
+    assert store.session(KEY).awaiting_response is True  # pure
+    assert spoken(p.section_finished()) == "the answer That's everything."
+
+
+def test_next_text_none_while_notice(store):
+    add_unheard(store, KEY, ["one", "two"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    p.section_finished()  # waiting on section two
+    assert p.next_text() is None  # not speaking
+    event = {"type": "needs_you", "session_key": KEY, "line": "Claude has a question for you."}
+    p.handle_event(event, KEY)
+    assert p.phase == "speaking"
+    assert p.next_text() is None
