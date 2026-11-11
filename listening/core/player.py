@@ -67,6 +67,7 @@ class Player:
         state = self.store.session(focused_key)
         if state.unheard:
             reply_id, state.unheard = state.unheard, None
+            state.awaiting_response = False  # whatever he was waiting for is here
             self.store.save_session(state)
             if self.store.load_reply(reply_id) is not None:
                 return self._start(focused_key, reply_id, 0)
@@ -102,6 +103,10 @@ class Player:
         return [StopSpeech()] + self._play(self.index)
 
     def stop(self) -> list[Effect]:
+        if self.phase == "responding":
+            return []  # waking Talon mid-dictation would hear the dictation
+        if self.phase == "speaking" and not self._notice:
+            self._rewind_to_interrupted()
         self.phase = "idle"
         self._notice = False
         return [StopSpeech(), Listen()]
@@ -123,13 +128,14 @@ class Player:
         return self._finish_item(reply)
 
     def respond_started(self, focused_key: str | None = None) -> list[Effect]:
-        key = self.key or focused_key
+        key = focused_key or self.key
         if key is not None:
             state = self.store.session(key)
             state.awaiting_response = True
-            context = self._listening_context()
-            if context is not None:
-                state.listening_context = context
+            if focused_key is None or focused_key == self.key:
+                context = self._listening_context()
+                if context is not None:
+                    state.listening_context = context
             self.store.save_session(state)
         self.phase = "responding"
         self._notice = False
@@ -137,11 +143,14 @@ class Player:
 
     def respond_finished(self, focused_key: str | None = None) -> list[Effect]:
         self.phase = "idle"
-        return [Listen()] + (self._take_awaited(self.key or focused_key) or [])
+        return [Listen()] + (self._take_awaited(focused_key or self.key) or [])
 
-    def reset(self) -> list[Effect]:
-        """Listening off: stop speech and forget the position (the store keeps
-        unheard replies and walkthroughs for next time)."""
+    def reset(self, focused_key: str | None = None) -> list[Effect]:
+        """Listening off: stop speech and forget the position. The store keeps
+        unheard replies and walkthroughs for next time, but nothing stays awaited,
+        so no later reply autoplays."""
+        for key in {self.key, focused_key} - {None}:
+            self._clear_awaiting(key)
         self.phase = "idle"
         self._clear_position()
         return [StopSpeech()]
@@ -170,21 +179,26 @@ class Player:
             if self.key == key:  # a new walkthrough replaces what was paused here
                 self.phase = "idle"
                 self._clear_position()
+            self._clear_awaiting(key)
             return self.go_ahead(key)
         if kind == "listening_on":
             return [Listen()]
         if kind == "listening_off":
-            return self.reset()
+            return self.reset(focused_key)
         return []
 
     def has_something(self, focused_key: str | None) -> bool:
         state = self.store.session(focused_key) if focused_key else None
         if state is not None and state.blocked:
             return False  # the knob keeps its normal meaning for the prompt
-        if self.phase in ("speaking", "waiting", "responding"):
-            return True
+        if self.phase in ("speaking", "responding"):
+            return True  # key 3 must stop the voice whichever tab is in front
         if state is None:
             return False
+        if self.key == focused_key and (
+            self.phase == "waiting" or self._paused_on(focused_key)
+        ):
+            return True
         return bool(state.unheard) or self._walkthrough_left(state) is not None
 
     # --- helpers -------------------------------------------------------------
@@ -246,6 +260,24 @@ class Player:
         self._notice = True
         self.phase = "speaking"
         return [Deafen(), Speak(line)]
+
+    def _rewind_to_interrupted(self) -> None:
+        """Stopped mid-section: make that section the next one to play."""
+        if self.last_played is None:
+            return
+        self.index = self.last_played
+        reply = self._reply()
+        if reply is not None and reply.kind == "walkthrough":
+            state = self.store.session(reply.session_key)
+            if state.walkthrough == reply.id:
+                state.walkthrough_pos = self.last_played
+                self.store.save_session(state)
+
+    def _clear_awaiting(self, key: str) -> None:
+        state = self.store.session(key)
+        if state.awaiting_response:
+            state.awaiting_response = False
+            self.store.save_session(state)
 
     def _interrupt(self) -> list[Effect]:
         return [StopSpeech()] if self.phase == "speaking" else []

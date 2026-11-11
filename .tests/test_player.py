@@ -421,3 +421,87 @@ def test_finishing_old_walkthrough_keeps_newer_one(store):
     assert p.section_finished() == [Listen()]
     assert store.session(KEY).walkthrough == newer
     assert p.go_ahead(KEY) == play("b1 That's everything.")
+
+
+# --- fix round 1 -------------------------------------------------------------
+
+
+def test_waiting_and_paused_count_only_for_their_own_session(store):
+    add_unheard(store, KEY, ["one", "two", "three"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    assert p.has_something(OTHER) is True  # speaking: key 3 stops it anywhere
+    p.section_finished()
+    assert (p.has_something(KEY), p.has_something(OTHER)) == (True, False)
+    p.stop()
+    assert (p.has_something(KEY), p.has_something(OTHER)) == (True, False)
+
+
+def test_respond_goes_to_focused_session(store):
+    add_unheard(store, KEY, ["one", "two"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    p.stop()
+    assert p.respond_started(OTHER) == [StopSpeech(), Deafen()]
+    other = store.session(OTHER)
+    assert (other.awaiting_response, other.listening_context) == (True, None)
+    key = store.session(KEY)
+    assert (key.awaiting_response, key.listening_context) == (False, None)
+    add_unheard(store, OTHER, ["answer"])  # arrives while he's still dictating
+    assert p.respond_finished(OTHER) == [Listen(), Deafen(), Speak("answer That's everything.")]
+
+
+def test_go_ahead_taking_unheard_clears_awaiting(store):
+    state = store.session(KEY)
+    state.awaiting_response = True
+    store.save_session(state)
+    add_unheard(store, KEY, ["one", "two"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    assert store.session(KEY).awaiting_response is False
+
+
+def test_focused_walkthrough_ready_clears_awaiting(store):
+    p = Player(store)
+    p.respond_started(KEY)
+    p.respond_finished(KEY)
+    rid = add_walkthrough(store, KEY, ["w1", "w2"])
+    event = {"type": "walkthrough_ready", "session_key": KEY, "reply_id": rid}
+    assert p.handle_event(event, KEY) == play("w1")
+    assert store.session(KEY).awaiting_response is False
+
+
+def test_reset_clears_awaiting_for_current_and_focused(store):
+    add_unheard(store, KEY, ["one", "two"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    p.respond_started(KEY)
+    for key in (KEY, OTHER):
+        state = store.session(key)
+        state.awaiting_response = True
+        store.save_session(state)
+    assert p.handle_event({"type": "listening_off", "session_key": ""}, OTHER) == [StopSpeech()]
+    assert store.session(KEY).awaiting_response is False
+    assert store.session(OTHER).awaiting_response is False
+    rid = add_unheard(store, KEY, ["later"])
+    assert p.handle_event(ready(KEY, rid), KEY) == [Chime("done", False)]
+
+
+def test_stop_mid_section_replays_it(store):
+    add_walkthrough(store, KEY, ["w1", "w2", "w3"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    p.section_finished()
+    p.continue_()  # w2 starts: walkthrough_pos 2
+    assert p.stop() == [StopSpeech(), Listen()]
+    assert store.session(KEY).walkthrough_pos == 1
+    assert p.go_ahead(KEY) == play("w2")
+    p.stop()
+    assert Player(store).go_ahead(KEY) == play("w2")  # from the store, too
+
+
+def test_stop_while_responding_does_nothing(store):
+    p = Player(store)
+    p.respond_started(KEY)
+    assert p.stop() == []
+    assert p.phase == "responding"
