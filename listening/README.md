@@ -11,7 +11,7 @@ Claude Code replies are rewritten for the ear and spoken through Talon, so you c
 
     /opt/homebrew/bin/python3 ~/.talon/user/dylan/.listening/install.py
 
-This backs up `~/.claude/settings.json` (to `settings.json.bak-listening-<timestamp>`), adds a Stop, a Notification (`permission_prompt`) and a UserPromptSubmit hook, and links `~/.claude/skills/listen` to `.listening/skill/listen`. It only adds; existing hooks stay. Running it again changes nothing. Running sessions pick the hooks up without a restart.
+This backs up `~/.claude/settings.json` (to `settings.json.bak-listening-<timestamp>`), adds a Stop, a Notification (`permission_prompt`) and a UserPromptSubmit hook, and links `~/.claude/skills/listen` to `.listening/skill/listen`. It only touches its own hooks; existing hooks stay. Running it again replaces its hooks with the current ones (so it also updates an older install) and otherwise changes nothing. Each hook command is wrapped in `/bin/sh -c '...; exit 0'`, so a missing or broken `listen.py` can never block or error a Claude prompt. Running sessions pick the hooks up without a restart.
 
 Options: `--settings PATH`, `--skills-dir PATH`, `--python PATH` (default `/opt/homebrew/bin/python3`, written verbatim into the hook commands; must be Python 3.10 or newer). SKILL.md uses `/opt/homebrew/bin/python3`, so a different `--python` also needs that line edited. It refuses to replace a `listen` skill folder that isn't its own link.
 
@@ -33,7 +33,7 @@ Only these are heard between spoken sections, and each must be said alone:
 | tab next / tab last | switch terminal tabs |
 | listening off | leave listening mode |
 
-Saying "respond" starts dictation. End it with the voice-key shortcut (not plain Space), so Talon un-mutes. With Claude Code's `/voice tap`, that second press also sends.
+Saying "respond" starts dictation. End it with the voice-key shortcut, so Talon un-mutes. With Claude Code's `/voice tap`, that second press also sends. Sending from the keyboard instead (Enter) also un-mutes Talon, once the prompt is submitted. "listening off" (or the Talon key) mid-dictation stops the recording, which sends what was dictated.
 
 ## Ulanzi AU05 as a remote
 
@@ -49,6 +49,8 @@ The knob (turn and press) and key 3 act as a remote only while the focused sessi
 | Talon key | leave listening mode | ctrl+opt+shift+cmd+T |
 
 Each control is just a hyper-key keyboard shortcut (ctrl+opt+shift+cmd plus V, T, B, J, L or K), so you can press the same shortcuts on a keyboard without the device.
+
+Running Claude inside tmux or herdr in Ghostty isn't supported for focus detection: listening mode can't tell which session is in front there.
 
 ## Blocked sessions
 

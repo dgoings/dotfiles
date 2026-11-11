@@ -1,7 +1,7 @@
 # Listening Mode: hearing Claude's replies instead of reading them
 
 Date: 2026-11-10
-Status: design, awaiting approval (reviewed by a builder check; answers folded in)
+Status: implemented (2026-11-11)
 
 ## Why
 
@@ -48,6 +48,10 @@ that's waiting for his review, without reading it.
 - A Ulanzi button for turning listening mode on and off (voice command for now).
 - A nicer Talon command for switching tabs (beyond what's in the listening
   command set below).
+
+**Voice (update).** The built-in Mac voice was replaced by local Kokoro
+(`bf_isabella`), with the Mac voice as a fallback when Kokoro isn't set up or
+fails (Task 11). Cloud voices are still a non-goal.
 
 ## Anti-goals (failure even if it technically works)
 
