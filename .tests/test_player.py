@@ -505,3 +505,75 @@ def test_stop_while_responding_does_nothing(store):
     p.respond_started(KEY)
     assert p.stop() == []
     assert p.phase == "responding"
+
+
+# --- spoken controls vs. the tab in front --------------------------------------
+
+
+def waiting_on_section_two(store):
+    """Section 1 of KEY's reply played; now paused between sections."""
+    add_unheard(store, KEY, ["one", "two", "three"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    p.section_finished()
+    return p
+
+
+def test_continue_with_no_focus_keeps_current_session(store):
+    p = waiting_on_section_two(store)  # then he switched to Slack
+    assert p.continue_(None) == play("two")
+
+
+def test_continue_in_same_tab_plays_next(store):
+    p = waiting_on_section_two(store)
+    assert p.continue_(KEY) == play("two")
+
+
+def test_continue_in_other_claude_tab_plays_that_tab(store):
+    p = waiting_on_section_two(store)
+    add_unheard(store, OTHER, ["other one"])
+    assert p.continue_(OTHER) == play("other one That's everything.")
+    assert p.key == OTHER
+
+
+def test_continue_with_no_focus_resumes_paused_session(store):
+    p = waiting_on_section_two(store)
+    p.stop()
+    assert p.continue_(None) == play("two")
+
+
+def test_continue_with_no_session_goes_ahead_in_focused_tab(store):
+    add_unheard(store, KEY, ["fresh"])
+    assert Player(store).continue_(KEY) == play("fresh That's everything.")
+
+
+def test_continue_with_no_session_and_no_focus_does_nothing(store):
+    assert Player(store).continue_(None) == []
+
+
+def test_repeat_with_no_focus_repeats_current(store):
+    p = waiting_on_section_two(store)
+    assert p.repeat(None) == play("one")
+
+
+def test_repeat_in_other_claude_tab_does_nothing(store):
+    p = waiting_on_section_two(store)
+    assert p.repeat(OTHER) == []
+    assert p.back(OTHER) == []
+    assert p.skip(OTHER) == []
+    assert p.phase == "waiting"
+
+
+def test_back_and_skip_with_no_focus_act_on_current(store):
+    p = waiting_on_section_two(store)
+    p.continue_(None)
+    p.section_finished()
+    assert p.back(None) == play("one")
+    p.section_finished()
+    assert p.skip(None) == [StopSpeech(), Deafen(), Speak("two")]
+
+
+def test_knob_while_speaking_acts_whichever_tab_is_in_front(store):
+    p = waiting_on_section_two(store)
+    p.continue_(KEY)  # section 2 speaking
+    assert p.skip(OTHER) == [StopSpeech(), Deafen(), Speak("three That's everything.")]

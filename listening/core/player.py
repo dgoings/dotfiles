@@ -80,25 +80,39 @@ class Player:
             self._clear_walkthrough(state)
         return [Speak(NOTHING_NEW)]
 
-    def continue_(self) -> list[Effect]:
+    # continue/repeat/back/skip act on the current session when no Claude tab is
+    # in front (focused_key None) or the same one is. Only a different focused
+    # Claude session redirects: continue plays that one, the others do nothing.
+
+    def continue_(self, focused_key: str | None = None) -> list[Effect]:
+        if self._elsewhere(focused_key):
+            return self.go_ahead(focused_key)
         if self.phase == "waiting" or (
             self.phase == "idle" and self.key and self._paused_on(self.key)
         ):
             return self._play(self.index)
+        if self.key is None and focused_key is not None:
+            return self.go_ahead(focused_key)  # nothing current: same as go ahead
         return []
 
-    def repeat(self) -> list[Effect]:
+    def repeat(self, focused_key: str | None = None) -> list[Effect]:
         if self.last_played is None or self.phase == "responding":
+            return []
+        if self._elsewhere(focused_key):
             return []
         return self._interrupt() + self._play(self.last_played)
 
-    def back(self) -> list[Effect]:
+    def back(self, focused_key: str | None = None) -> list[Effect]:
         if self.last_played is None or self.phase == "responding":
+            return []
+        if self._elsewhere(focused_key):
             return []
         return self._interrupt() + self._play(max(self.last_played - 1, 0))
 
-    def skip(self) -> list[Effect]:
+    def skip(self, focused_key: str | None = None) -> list[Effect]:
         if self.last_played is None or self.phase == "responding":
+            return []
+        if self._elsewhere(focused_key):
             return []
         return [StopSpeech()] + self._play(self.index)
 
@@ -202,6 +216,16 @@ class Player:
         return bool(state.unheard) or self._walkthrough_left(state) is not None
 
     # --- helpers -------------------------------------------------------------
+
+    def _elsewhere(self, focused_key: str | None) -> bool:
+        """A different Claude session is in front of the one paused here. While
+        the voice is speaking, the controls act on it whichever tab is in front."""
+        return (
+            focused_key is not None
+            and self.key is not None
+            and focused_key != self.key
+            and self.phase != "speaking"
+        )
 
     def _start(self, key: str, reply_id: str, index: int) -> list[Effect]:
         self.key, self.reply_id = key, reply_id

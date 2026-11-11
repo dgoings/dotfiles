@@ -319,20 +319,6 @@ def _listening_off(focused: _Focus) -> None:
 # --- control helpers ---------------------------------------------------------
 
 
-def _owns_or_speaking(focused_key) -> bool:
-    """repeat/back/skip only act on the session in front, or on what's playing."""
-    return player.phase == "speaking" or (
-        player.key is not None and player.key == focused_key
-    )
-
-
-def _continue(focused_key) -> None:
-    if player.phase == "waiting" and player.key == focused_key:
-        _run(player.continue_())
-    else:
-        _run(player.go_ahead(focused_key))
-
-
 def _start_respond(focused_key) -> None:
     global _responding
     _responding = True
@@ -370,13 +356,12 @@ def _intercept(control: str) -> bool:
         _run(player.go_ahead(key))
     elif control == "back":
         _run(player.stop())
-    elif _owns_or_speaking(key):
-        if control == "knob_right":
-            _run(player.skip())
-        elif player.phase == "speaking":
-            _run(player.back())
-        else:
-            _run(player.repeat())
+    elif control == "knob_right":
+        _run(player.skip(key))
+    elif player.phase == "speaking":
+        _run(player.back(key))
+    else:
+        _run(player.repeat(key))
     return True
 
 
@@ -464,25 +449,22 @@ class Actions:
     def listening_continue():
         """Play the next section"""
         with _lock:
-            _continue(_Focus()())
+            _run(player.continue_(_Focus()()))
 
     def listening_repeat():
         """Play this section again"""
         with _lock:
-            if _owns_or_speaking(_Focus()()):
-                _run(player.repeat())
+            _run(player.repeat(_Focus()()))
 
     def listening_back():
         """Go back a section"""
         with _lock:
-            if _owns_or_speaking(_Focus()()):
-                _run(player.back())
+            _run(player.back(_Focus()()))
 
     def listening_skip():
         """Skip to the next section"""
         with _lock:
-            if _owns_or_speaking(_Focus()()):
-                _run(player.skip())
+            _run(player.skip(_Focus()()))
 
     def listening_stop():
         """Stop playback; the rest stays available"""
