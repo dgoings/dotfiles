@@ -341,3 +341,51 @@ Keep only recent replies; the builder decides how many.
   voice talks through them.
 - A cloud voice.
 - A Ulanzi gesture for listening on/off.
+
+## Findings (hook probe, 2026-11-11)
+
+Probed with a temporary logging hook on Stop, Notification and
+UserPromptSubmit, in a fresh Claude Code 2.1.322 session in Ghostty and one in
+Rex, plus Dylan's other running sessions.
+
+- **Hooks reach running sessions.** A change to `~/.claude/settings.json` takes
+  effect in sessions that are already open, so no restart is needed.
+- **Rex:** hooks inherit `REX_BLOCK` and `REX_SESSION` (and
+  `TERM_PROGRAM=rex`). `REX_BLOCK` (e.g. `block:01a1cadd-…`) equals the
+  `focused_block_id` from `rex session inspect "$REX_SESSION" --json` while
+  that tab is in front. The Rex session's process tree also has a tty
+  (`ttys007`), but `REX_BLOCK` is the key.
+- **Ghostty:** hooks don't get `REX_*`. The hook itself runs with no tty, so
+  the walk up the parents decides. For a plain session, the first tty found
+  (`claude` → `fish` → `login`, all `ttys006`) matches Ghostty's
+  `focused terminal` tty. **But** a session started from Claude Code's
+  background helper runs under `claude bg-spare` (its own pty, `ttys004`) →
+  `claude bg-pty-host` (no tty) → the tab's `claude` (`ttys002`). The first tty
+  is wrong there. **Rule: use the topmost tty in the chain**, the last one seen
+  before reaching PID 1 or the terminal app.
+- **Blocked sessions:** all three cases fire `Notification` with
+  `notification_type: "permission_prompt"`, about **6 seconds** after the
+  prompt appears. If Dylan answers within those 6 seconds, nothing fires. That
+  suits us: no chime for something he's already handling.
+  - Plan approval (ExitPlanMode): message `"Claude Code needs your approval for
+    the plan"`.
+  - Tool permission (Bash in default mode): message `"Claude needs your
+    permission"`.
+  - Multiple-choice (AskUserQuestion): **the same message as a tool
+    permission.** It's told apart by the last `tool_use` in the transcript
+    (`transcript_path` in the payload): `AskUserQuestion` means a question.
+  - In auto mode, plain commands never prompt, so tool-permission notifications
+    are rare for Dylan.
+- **Notifications to ignore:** `idle_prompt` ("Claude is waiting for your
+  input") fires about 45–60 s after every finished reply.
+- **UserPromptSubmit isn't always Dylan.** When a background agent finishes,
+  its result arrives as a prompt that starts with `<task-notification>`. Those
+  prompts must not count as Dylan answering (no clearing `blocked`, no
+  consuming `listening_context`).
+- **Stop can fire before the work is done.** A turn that only starts a
+  background agent ends with a Stop ("I've started an Explore agent…"), and
+  another Stop follows when the result is in. Both are real written replies,
+  so both get spoken; the first one is just short.
+- `Stop` stdin carries `last_assistant_message` and `stop_hook_active`, as
+  documented. Notification stdin has `message`, `notification_type`,
+  `session_id` and `transcript_path`, but no `title`.

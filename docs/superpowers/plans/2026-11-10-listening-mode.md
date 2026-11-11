@@ -103,7 +103,7 @@ If a blocked case fires no Notification at all, note it. Task 4 covers only the 
 - Test: `.tests/test_session.py`, `.tests/test_spoken.py`
 
 **Interfaces:**
-- Produces (`core/session.py`): `own_session_key(env: Mapping[str, str], tty_of: Callable[[int], str], parent_of: Callable[[int], int], pid: int) -> str | None`. If `REX_BLOCK` is in env, returns `"rex:" + value`. Otherwise it walks from `pid` up through parents, and the first `tty_of(p)` that isn't `"??"` or empty gives `"tty:/dev/" + tty`. Returns None at PID 1. Also `default_tty_of(pid)` and `default_parent_of(pid)`, both using `ps -o tty=` and `ps -o ppid=`. Adjust to the Task 1 findings if they differ.
+- Produces (`core/session.py`): `own_session_key(env: Mapping[str, str], tty_of: Callable[[int], str], parent_of: Callable[[int], int], pid: int) -> str | None`. If `REX_BLOCK` is in env, returns `"rex:" + value`. Otherwise it walks from `pid` up through parents to PID 1, and the **topmost** (last seen) `tty_of(p)` that isn't `"??"` or empty gives `"tty:/dev/" + tty` (Task 1 finding: sessions under Claude's background helper have an inner pty below the tab's real tty). Returns None if no tty is found. Stop if a parent lookup fails or loops. Also `default_tty_of(pid)` and `default_parent_of(pid)`, both using `ps -o tty=` and `ps -o ppid=`.
 - Produces (`core/spoken.py`):
   - `class SpokenFormatError(ValueError)`;
   - `parse_sections(raw: str) -> list[Section]`. It accepts `{"sections": [{"title", "text"}...]}`, optionally inside ```` ```json ```` fences or with prose around the JSON object. It raises `SpokenFormatError` when there's no valid object, the list is empty, or a text is empty.
@@ -113,6 +113,7 @@ If a blocked case fires no Notification at all, note it. Task 4 covers only the 
 - [ ] **Step 1: Write failing tests:**
   - `test_rex_env_wins`: env `{"REX_BLOCK": "block:9"}` gives `"rex:block:9"`.
   - `test_walks_to_first_real_tty`: ttys `{50: "??", 40: "??", 30: "ttys003"}`, parents `50→40→30→1`, pid 50 gives `"tty:/dev/ttys003"`.
+  - `test_topmost_tty_wins`: ttys `{50: "??", 40: "ttys004", 30: "??", 20: "ttys002", 10: "??"}`, parents `50→40→30→20→10→1`, pid 50 gives `"tty:/dev/ttys002"`.
   - `test_no_tty_returns_none`.
   - `test_parse_plain_json`, `test_parse_fenced_json_with_prose`: both give `[Section("Browser", "I fixed it.")]`.
   - `test_parse_rejects_empty_list` and `test_parse_rejects_garbage`: both raise `SpokenFormatError`.
@@ -134,8 +135,8 @@ If a blocked case fires no Notification at all, note it. Task 4 covers only the 
 - Produces (subcommands; all exit 0 on any internal error, and all exit immediately when `LISTENING_NESTED` is set):
   - `listen.py on` / `listen.py off`: set the flag, and push event `listening_on` / `listening_off` (session key `""`).
   - `listen.py walkthrough --title TEXT`, with sections JSON on stdin: sets the flag on and creates a reply with kind `walkthrough`. The session's `walkthrough` is set to the new id, `walkthrough_pos` to 0, and `suppress_next_stop` to True. Pushes `listening_on` if the flag was off, then `walkthrough_ready`. Prints `Walkthrough queued (N sections).` On invalid JSON it exits 2 with the parse error on stderr. This is the one non-zero exit, so the skill can fix its JSON.
-  - `listen.py hook-prompt` (UserPromptSubmit): when on, it clears `blocked`. If `listening_context` is set, it prints `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": <context>}}` and clears the context.
-  - `listen.py hook-notify` (Notification): when on, it maps `notification_type` to a needs-you line using `NEEDS_YOU = {type: line}`, which has exactly the types Task 1 found for permission, question and plan, using the Global Constraints copy. On a match it sets `blocked=True` and pushes `needs_you` with `line=...`. Other types are ignored.
+  - `listen.py hook-prompt` (UserPromptSubmit): when on, and the prompt doesn't start with `<task-notification>` (a background agent's result, not Dylan; such prompts do nothing), it clears `blocked`. If `listening_context` is set, it prints `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": <context>}}` and clears the context.
+  - `listen.py hook-notify` (Notification): when on, it picks a needs-you line with `blocked_line(payload: dict, last_tool: str | None) -> str | None` (pure, in `listen.py`), using the Global Constraints copy. Task 1 found all three cases arrive as `notification_type == "permission_prompt"`: a `message` containing `"approval for the plan"` → the plan line; otherwise `last_tool == "AskUserQuestion"` → the question line; otherwise → the permission line. Any other type (e.g. `idle_prompt`) → None. `last_tool` comes from `last_tool_use_name(transcript_path) -> str | None`, which reads only the last 256 KB of the JSONL transcript and returns the `name` of the last `tool_use` block in an `assistant` entry's `message.content`, or None on any error. On a match it sets `blocked=True` and pushes `needs_you` with `line=...`.
 - The session key for every hook comes from `own_session_key(os.environ, default_tty_of, default_parent_of, os.getpid())`. With no key, the hook does nothing.
 
 - [ ] **Step 1: Write failing tests:**
@@ -144,7 +145,10 @@ If a blocked case fires no Notification at all, note it. Task 4 covers only the 
   - `test_walkthrough_turns_on_and_queues`: flag off; stdin `{"sections":[{"title":"Intro","text":"Hi."}]}`, `--title "Design doc"`. Afterwards `is_on()`, events are `["listening_on", "walkthrough_ready"]`, and the session has `walkthrough` set and `suppress_next_stop` True. (Set `REX_BLOCK=block:t` in the test env for a stable key.)
   - `test_walkthrough_bad_json_exits_2`.
   - `test_prompt_hook_injects_context_once`: the session has `listening_context="Dylan was listening to section 2"`. The first run prints JSON whose `additionalContext` contains it; the second run prints nothing.
-  - `test_notify_permission_sets_blocked`: type from Task 1; the event has `line == "Claude needs you to approve something."`.
+  - `test_notify_permission_sets_blocked`: `{"notification_type": "permission_prompt", "message": "Claude needs your permission"}`; the event has `line == "Claude needs you to approve something."`.
+  - `test_notify_plan_and_question_lines`: the plan message `"Claude Code needs your approval for the plan"` gives `"Claude has a plan for you to review."`; a permission payload whose `transcript_path` is a tmp JSONL ending in an assistant `tool_use` named `AskUserQuestion` gives `"Claude has a question for you."`.
+  - `test_notify_idle_ignored`: `notification_type: "idle_prompt"` pushes nothing.
+  - `test_prompt_hook_ignores_task_notifications`: `blocked=True` and `listening_context` set; a prompt starting with `<task-notification>` leaves both unchanged and prints nothing.
 - [ ] **Step 2:** Run `.venv/bin/pytest .tests/test_listen_cli.py -q`. Expected: FAIL.
 - [ ] **Step 3:** Implement those subcommands in `listen.py`.
 - [ ] **Step 4:** Run all tests. Expected: pass.
