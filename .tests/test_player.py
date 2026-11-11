@@ -660,3 +660,44 @@ def test_next_text_none_while_notice(store):
     p.handle_event(event, KEY)
     assert p.phase == "speaking"
     assert p.next_text() is None
+
+
+# --- final review fixes --------------------------------------------------------
+
+
+def test_prompt_sent_is_ignored(store):
+    p = waiting_on_section_two(store)
+    p.respond_started(KEY)
+    assert p.handle_event({"type": "prompt_sent", "session_key": KEY, "at": 1.0}, KEY) == []
+    assert p.phase == "responding"
+
+
+def test_go_ahead_with_no_focus_resumes_when_waiting(store):
+    p = waiting_on_section_two(store)
+    assert p.go_ahead(None) == play("two")
+
+
+def test_go_ahead_with_no_focus_resumes_when_paused(store):
+    p = waiting_on_section_two(store)
+    p.continue_()
+    p.stop()  # stopped mid "two": paused on it
+    assert p.go_ahead(None) == play("two")
+
+
+def test_go_ahead_with_no_focus_and_nothing_paused_cant_tell(store):
+    add_unheard(store, KEY, ["one"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    p.section_finished()  # finished the only section: idle, nothing paused
+    assert p.go_ahead(None) == [Speak(CANT_TELL)]
+
+
+def test_reset_clears_awaiting_in_every_session(store):
+    third = "rex:block:other"
+    for key in (KEY, OTHER, third):
+        state = store.session(key)
+        state.awaiting_response = True
+        store.save_session(state)
+    p = Player(store)
+    assert p.reset() == [StopSpeech()]
+    assert [store.session(k).awaiting_response for k in (KEY, OTHER, third)] == [False] * 3

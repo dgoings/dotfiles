@@ -61,6 +61,10 @@ class Player:
         if self.phase in ("speaking", "responding"):
             return []
         if focused_key is None:
+            if self.key is not None and (
+                self.phase == "waiting" or self._paused_on(self.key)
+            ):
+                return self.continue_()  # resume what's in progress, wherever
             return [Speak(CANT_TELL)]
         if self.phase == "waiting" and self.key == focused_key:
             return self.continue_()
@@ -177,12 +181,11 @@ class Player:
         self.phase = "idle"
         return [Listen()] + (self._take_awaited(focused_key or self.key) or [])
 
-    def reset(self, focused_key: str | None = None) -> list[Effect]:
+    def reset(self) -> list[Effect]:
         """Listening off: stop speech and forget the position. The store keeps
-        unheard replies and walkthroughs for next time, but nothing stays awaited,
-        so no later reply autoplays."""
-        for key in {self.key, focused_key} - {None}:
-            self._clear_awaiting(key)
+        unheard replies and walkthroughs for next time, but nothing stays awaited
+        in any session, so no later reply autoplays."""
+        self.store.clear_awaiting_all()
         self.phase = "idle"
         self._clear_position()
         return [StopSpeech()]
@@ -216,7 +219,9 @@ class Player:
         if kind == "listening_on":
             return [Listen()]
         if kind == "listening_off":
-            return self.reset(focused_key)
+            return self.reset()
+        if kind == "prompt_sent":
+            return []  # the glue uses it to end a response sent from the keyboard
         return []
 
     def has_something(self, focused_key: str | None) -> bool:

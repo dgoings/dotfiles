@@ -4,11 +4,13 @@
     install.py [--settings PATH] [--skills-dir PATH] [--python PATH] [--uninstall]
 
 Only touches hook entries whose command contains `/.listening/listen.py`, and the
-`<skills-dir>/listen` symlink when it points at this repo's skill.
+`<skills-dir>/listen` symlink when it points at this repo's skill. Re-running it
+replaces our entries with the current ones, so it also refreshes old installs.
 """
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -36,9 +38,24 @@ def python_ok(python: str) -> bool:
         return False
 
 
+def _double_quoted(path) -> str:
+    """`path` in POSIX double quotes (only \\ " $ and ` need escaping there)."""
+    escaped = "".join("\\" + c if c in '\\"$`' else c for c in str(path))
+    return f'"{escaped}"'
+
+
+def hook_command(python: str, sub: str) -> str:
+    """The hook command. It always exits 0 and stays quiet on stderr, so a
+    missing or broken listen.py can never block or error a Claude prompt
+    (UserPromptSubmit blocks the prompt on exit 2). Stdout passes through
+    for hook-prompt's JSON."""
+    script = f"{_double_quoted(python)} {_double_quoted(LISTEN)} {sub} 2>/dev/null; exit 0"
+    return f"/bin/sh -c {shlex.quote(script)}"
+
+
 def our_entries(python: str) -> dict:
     def cmd(sub: str) -> str:
-        return f"{python} {LISTEN} {sub}"
+        return hook_command(python, sub)
 
     return {
         "Stop": {"hooks": [{"type": "command", "command": cmd("hook-stop"),
@@ -61,11 +78,24 @@ def group_has_ours(group) -> bool:
 
 
 def add_hooks(settings: dict, python: str) -> None:
+    """Add our entries, replacing any of ours already there (old formats
+    included), so there is exactly one of ours per event. Our group goes where
+    the first old one was; foreign hooks sharing a group with ours stay."""
     hooks = settings.setdefault("hooks", {})
     for event, group in our_entries(python).items():
         groups = hooks.setdefault(event, [])
-        if not any(group_has_ours(g) for g in groups):
-            groups.append(group)
+        kept, at = [], None
+        for g in groups:
+            if not group_has_ours(g):
+                kept.append(g)
+                continue
+            rest = [h for h in g["hooks"] if not (isinstance(h, dict) and is_ours(h))]
+            if rest:
+                kept.append({**g, "hooks": rest})
+            if at is None:
+                at = len(kept)  # where the old one was, after any hooks it shared
+        kept.insert(len(kept) if at is None else at, group)
+        groups[:] = kept
 
 
 def remove_hooks(settings: dict) -> None:

@@ -78,3 +78,22 @@ def test_load_written(store):
     rid = store.create_reply("rex:block:x", "reply", "hello there")
     assert store.load_written(rid) == ("rex:block:x", "hello there")
     assert store.load_written("nope") is None
+
+
+def test_clear_awaiting_all(store):
+    keys = ["tty:/dev/ttys003", "rex:block:1", "tty:/dev/ttys009"]
+    for key, awaiting in zip(keys, (True, True, False)):
+        state = store.session(key)
+        state.awaiting_response = awaiting
+        state.unheard = f"r-{key}"
+        store.save_session(state)
+    (store.root / "sessions" / "junk.json").write_text("not json")
+    store.clear_awaiting_all()
+    for key in keys:
+        state = store.session(key)
+        assert state.awaiting_response is False
+        assert state.unheard == f"r-{key}"  # nothing else changes
+
+
+def test_clear_awaiting_all_without_sessions(store):
+    store.clear_awaiting_all()  # no sessions folder yet: nothing to do

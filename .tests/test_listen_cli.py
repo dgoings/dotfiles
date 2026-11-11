@@ -186,7 +186,9 @@ def make_reply(store, written=WRITTEN):
     return store.create_reply(KEY, "reply", written)
 
 
-def rewrite(store, fake, rid, mode="ok", **extra):
+def rewrite(store, fake, rid, mode="ok", on=True, **extra):
+    if on:
+        store.set_on(True)
     env = {"LISTENING_CLAUDE_BIN": str(fake), "FAKE_MODE": mode, **extra}
     return run(store, "rewrite", rid, env_extra=env)
 
@@ -291,3 +293,83 @@ def test_stop_clears_blocked_and_noops_on_empty(store):
     run(store, "hook-stop", stdin=json.dumps({"last_assistant_message": "  "}))
     assert store.session(KEY).blocked is False
     assert not (store.root / "replies").exists() or not list((store.root / "replies").iterdir())
+
+
+# ---- final review fixes ----
+
+
+def load_listen_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("listen_under_test", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_missing_core_exits_0_silently(store, tmp_path):
+    lonely = tmp_path / "elsewhere" / ".listening"
+    lonely.mkdir(parents=True)
+    copy = lonely / "listen.py"
+    copy.write_text(SCRIPT.read_text())
+    store.set_on(True)
+    env = {k: v for k, v in __import__("os").environ.items() if k != "LISTENING_NESTED"}
+    env["LISTENING_STATE_DIR"] = str(store.root)
+    for sub in ("hook-prompt", "hook-stop", "hook-notify"):
+        r = subprocess.run([str(PY), str(copy), sub], input="{}", capture_output=True,
+                           text=True, env=env, cwd="/")
+        assert (r.returncode, r.stdout, r.stderr) == (0, "", ""), sub
+
+
+def test_missing_style_guide_falls_back(store, fake_claude, tmp_path, monkeypatch):
+    from core.spoken import fallback_sections
+
+    mod = load_listen_module()
+    monkeypatch.setattr(mod, "STYLE_GUIDE", tmp_path / "no-such-style-guide.md")
+    monkeypatch.setenv("LISTENING_CLAUDE_BIN", str(fake_claude))
+    monkeypatch.delenv("LISTENING_NESTED", raising=False)
+    store.set_on(True)
+    rid = make_reply(store)
+    assert mod.main(["rewrite", rid]) == 0
+    assert store.load_reply(rid).sections == fallback_sections(WRITTEN)
+    assert store.session(KEY).unheard == rid
+    assert event_types(store) == ["reply_ready"]
+
+
+def test_prompt_hook_pushes_prompt_sent_once(store):
+    store.set_on(True)
+    r = run(store, "hook-prompt", stdin=json.dumps({"prompt": "typed answer"}))
+    assert (r.returncode, r.stdout) == (0, "")
+    events = store.pop_events()
+    assert [(e["type"], e["session_key"]) for e in events] == [("prompt_sent", KEY)]
+    assert isinstance(events[0]["at"], float)
+
+
+def test_prompt_hook_pushes_prompt_sent_alongside_context(store):
+    store.set_on(True)
+    s = store.session(KEY)
+    s.blocked = True
+    s.listening_context = "ctx"
+    store.save_session(s)
+    r = run(store, "hook-prompt", stdin=json.dumps({"prompt": "answer"}))
+    assert "ctx" in r.stdout
+    assert event_types(store) == ["prompt_sent"]
+
+
+def test_prompt_hook_no_prompt_sent_for_task_notification_or_off(store):
+    store.set_on(True)
+    run(store, "hook-prompt", stdin=json.dumps({"prompt": "<task-notification>x</task-notification>"}))
+    assert store.pop_events() == []
+    store.set_on(False)
+    run(store, "hook-prompt", stdin=json.dumps({"prompt": "typed"}))
+    assert store.pop_events() == []
+
+
+def test_rewrite_after_listening_off_saves_but_does_not_announce(store, fake_claude):
+    rid = make_reply(store)
+    r = rewrite(store, fake_claude, rid, on=False)
+    assert r.returncode == 0
+    assert store.load_reply(rid) is not None  # sections saved, harmless
+    assert store.session(KEY).unheard is None
+    assert not (store.root / "sessions").exists() or not list((store.root / "sessions").iterdir())
+    assert store.pop_events() == []

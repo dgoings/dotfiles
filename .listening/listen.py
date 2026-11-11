@@ -2,9 +2,12 @@
 """Listening mode CLI: called by Claude Code hooks and the walkthrough skill.
 
 Hooks never print anything except the documented hook-prompt JSON, and never
-fail: any internal error is swallowed and the exit code is 0. The one
-deliberate non-zero exit is `walkthrough` with invalid sections JSON (exit 2).
+fail: any internal error (even a broken `core` import) is swallowed and the
+exit code is 0. The one deliberate non-zero exit is `walkthrough` with invalid
+sections JSON (exit 2).
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -12,13 +15,21 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "listening"))
 
-from core.session import default_parent_of, default_tty_of, own_session_key  # noqa: E402
-from core.spoken import SpokenFormatError, fallback_sections, parse_sections  # noqa: E402
-from core.store import Store  # noqa: E402
+
+def _import_core() -> None:
+    """Imported from main()'s try, not at the top, so a missing or broken
+    `core` still exits 0 silently."""
+    global default_parent_of, default_tty_of, own_session_key
+    global SpokenFormatError, fallback_sections, parse_sections, Store
+    from core.session import default_parent_of, default_tty_of, own_session_key
+    from core.spoken import SpokenFormatError, fallback_sections, parse_sections
+    from core.store import Store
+
 
 TAIL_BYTES = 256 * 1024
 STYLE_GUIDE = Path(__file__).resolve().parent.parent / "listening" / "style_guide.md"
@@ -127,11 +138,14 @@ def cmd_hook_prompt(args) -> None:
         return
     state = store.session(key)
     context = state.listening_context
-    if not state.blocked and not context:
-        return
-    state.blocked = False
-    state.listening_context = None
-    store.save_session(state)
+    if state.blocked or context:
+        state.blocked = False
+        state.listening_context = None
+        store.save_session(state)
+    # Lets Talon end a response that was sent from the keyboard instead of
+    # the voice key (otherwise it stays deaf). `at` lets it skip a prompt sent
+    # before the response started.
+    store.push_event("prompt_sent", key, at=time.time())
     if context:
         print(
             json.dumps(
@@ -210,12 +224,12 @@ def rewrite_timeout() -> float:
 
 def haiku_sections(store: Store, written: str):
     """Sections from the nested Haiku call, or None on any failure."""
-    prompt = (
-        STYLE_GUIDE.read_text()
-        + "\n\nThis is update mode: rewrite the following reply for listening.\n\n"
-        + written
-    )
     try:
+        prompt = (
+            STYLE_GUIDE.read_text()
+            + "\n\nThis is update mode: rewrite the following reply for listening.\n\n"
+            + written
+        )
         done = subprocess.run(
             [
                 claude_binary(),
@@ -249,8 +263,8 @@ def haiku_sections(store: Store, written: str):
         if not isinstance(result, str):
             return None
         return parse_sections(result)
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None  # includes timeout, bad JSON and SpokenFormatError
+    except Exception:
+        return None  # e.g. no style guide, timeout, bad JSON, SpokenFormatError
 
 
 def cmd_rewrite(args) -> None:
@@ -263,6 +277,9 @@ def cmd_rewrite(args) -> None:
     if not sections:
         return
     store.save_sections(args.reply_id, sections)
+    if not store.is_on():
+        store.prune()
+        return  # listening went off while Haiku ran: don't queue or announce it
     state = store.session(key)
     state.unheard = args.reply_id
     store.save_session(state)
@@ -295,6 +312,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit:
         return 0  # a bad invocation must never break a Claude session
     try:
+        _import_core()
         return args.func(args) or 0
     except Exception:
         return 0

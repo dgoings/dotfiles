@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -30,6 +31,10 @@ def load(settings):
     return json.loads(settings.read_text())
 
 
+def expected_command(sub, python=sys.executable, listen=f"{REPO}/.listening/listen.py"):
+    return f"/bin/sh -c '\"{python}\" \"{listen}\" {sub} 2>/dev/null; exit 0'"
+
+
 def test_install_adds_hooks_keeps_existing(env):
     assert run(env) == 0
     hooks = load(env[0])["hooks"]
@@ -38,7 +43,7 @@ def test_install_adds_hooks_keeps_existing(env):
         assert len(hooks[event]) == 1
     stop = hooks["Stop"][0]["hooks"][0]
     assert stop == {"type": "command", "async": True, "timeout": 10,
-                    "command": f"{sys.executable} {REPO}/.listening/listen.py hook-stop"}
+                    "command": expected_command("hook-stop")}
     note = hooks["Notification"][0]
     assert note["matcher"] == "permission_prompt"
     assert note["hooks"][0]["async"] is True
@@ -102,3 +107,58 @@ def test_refuses_odd_settings_shape(env, content, capsys):
     assert run(env) == 1
     assert env[0].read_text() == content
     assert not list(env[0].parent.glob("settings.json.bak-*"))
+
+
+# ---- final review: hooks never block or error a prompt ----
+
+
+def test_hook_commands_are_wrapped_to_exit_0():
+    entries = install.our_entries(sys.executable)
+    subs = {"Stop": "hook-stop", "Notification": "hook-notify", "UserPromptSubmit": "hook-prompt"}
+    for event, sub in subs.items():
+        command = entries[event]["hooks"][0]["command"]
+        assert command == expected_command(sub)
+        assert install.MARKER in command
+
+
+def test_rerun_replaces_old_format_entry(env):
+    old = {"hooks": [{"type": "command", "async": True, "timeout": 10,
+                      "command": f"{sys.executable} {REPO}/.listening/listen.py hook-stop"}]}
+    env[0].write_text(json.dumps({"hooks": {"SessionStart": [HERDR], "Stop": [old]}}))
+    assert run(env) == 0
+    hooks = load(env[0])["hooks"]
+    assert hooks["SessionStart"] == [HERDR]
+    for event in ("Stop", "Notification", "UserPromptSubmit"):
+        assert len(hooks[event]) == 1
+        assert len(hooks[event][0]["hooks"]) == 1
+    assert hooks["Stop"][0]["hooks"][0]["command"] == expected_command("hook-stop")
+
+
+def test_rerun_keeps_foreign_hook_sharing_our_group(env):
+    mixed = {"hooks": [{"type": "command", "command": "other-tool stop"},
+                       {"type": "command", "command": f"python3 {REPO}/.listening/listen.py hook-stop"}]}
+    env[0].write_text(json.dumps({"hooks": {"Stop": [mixed]}}))
+    assert run(env) == 0
+    stop = load(env[0])["hooks"]["Stop"]
+    commands = [h["command"] for g in stop for h in g["hooks"]]
+    assert commands == ["other-tool stop", expected_command("hook-stop")]
+
+
+def test_command_with_missing_listen_py_exits_0(tmp_path, monkeypatch):
+    monkeypatch.setattr(install, "LISTEN", tmp_path / "gone" / ".listening" / "listen.py")
+    for event in ("Stop", "Notification", "UserPromptSubmit"):
+        command = install.our_entries(sys.executable)[event]["hooks"][0]["command"]
+        r = subprocess.run(command, shell=True, input="{}", capture_output=True, text=True)
+        assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
+
+
+def test_command_quotes_odd_paths(tmp_path, monkeypatch):
+    odd = tmp_path / "it's a \"dir\" $HOME `x`" / ".listening"
+    odd.mkdir(parents=True)
+    script = odd / "listen.py"
+    script.write_text("import sys; print(sys.argv[1:])\n")
+    monkeypatch.setattr(install, "LISTEN", script)
+    command = install.our_entries(sys.executable)["Stop"]["hooks"][0]["command"]
+    assert install.MARKER in command
+    r = subprocess.run(command, shell=True, capture_output=True, text=True)
+    assert (r.returncode, r.stdout) == (0, "['hook-stop']\n")

@@ -15,6 +15,7 @@ import re
 import signal
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 from talon import Module, actions, app, cron, scope, settings, ui
@@ -78,6 +79,8 @@ player = Player(store)
 _lock = threading.RLock()
 _on = False  # Talon is in listening mode
 _responding = False  # Claude's /voice is recording an answer (voice key / "respond")
+_responding_key = None  # session being answered (None: couldn't tell)
+_responding_since = 0.0  # time.time() the response started
 _say = None  # running `say` process
 _say_generation = 0  # generation the running `say` belongs to
 _generation = 0  # bumped whenever we kill speech, so a killed `say` never counts as finished
@@ -266,8 +269,20 @@ def _speak(text: str) -> None:
     which renders and then becomes afplay (or `say` if Kokoro fails) under the
     same PID, so it's tracked and killed exactly like a `say`."""
     global _say, _say_generation
-    _stop_speech()
-    _say_generation = _generation
+    try:
+        _stop_speech()
+        _say_generation = _generation
+        _start_speech(text)
+    except Exception as e:
+        # Whatever failed, the next tick must finish the section and wake Talon.
+        _log(f"speech failed to start: {e!r}")
+        _say_generation = _generation
+        if _say is None:
+            _say = _FailedSay()
+
+
+def _start_speech(text: str) -> None:
+    global _say
     kokoro = _kokoro_command("--play", text)
     for command in ([kokoro] if kokoro else []) + [_say_command(text)]:
         try:
@@ -378,8 +393,11 @@ def _tick_body() -> None:
         if kind == "listening_on":
             continue  # already on; a Listen now could wake the mic mid-speech
         if kind == "listening_off":
-            _listening_off(focused)
+            _listening_off()
             break
+        if kind == "prompt_sent":
+            _prompt_sent(event)
+            continue
         _run(player.handle_event(event, focused()))
 
 
@@ -390,25 +408,52 @@ def _turn_on() -> None:
     _run([Listen()])
 
 
-def _listening_off(focused: _Focus) -> None:
+def _listening_off() -> None:
     global _on, _responding
+    was_responding = _responding
     _on = False
     _responding = False
-    _run([StopSpeech()])  # silence first; the focus lookup can take a moment
+    if was_responding:
+        try:
+            # Stops Claude's /voice recording (it sends what was dictated).
+            actions.user.ulanzi_key("space")
+        except Exception as e:
+            _log(f"stopping /voice failed: {e!r}")
+    _run([StopSpeech()])
     for step in (_restore_mic, _leave_listening_modes, lambda: store.set_on(False)):
         try:
             step()
         except Exception as e:
             _log(f"listening off step failed: {e!r}")
-    _run(player.reset(focused()))
+    _run(player.reset())
+
+
+def _prompt_sent(event: dict) -> None:
+    """A prompt was submitted. If it's the response being dictated, sent from
+    the keyboard instead of the voice key, finish the response without
+    pressing Space, so Talon doesn't stay deaf. After a voice-key finish,
+    _responding is already False and this does nothing."""
+    global _responding
+    if not _responding:
+        return
+    key = event.get("session_key")
+    if _responding_key is not None and key != _responding_key:
+        return  # another session's prompt
+    at = event.get("at")
+    if isinstance(at, (int, float)) and at < _responding_since:
+        return  # submitted before this response started
+    _responding = False
+    _run(player.respond_finished(key))
 
 
 # --- control helpers ---------------------------------------------------------
 
 
 def _start_respond(focused_key) -> None:
-    global _responding
+    global _responding, _responding_key, _responding_since
     _responding = True
+    _responding_key = focused_key or player.key
+    _responding_since = time.time()
     _run(player.respond_started(focused_key))
     actions.user.ulanzi_key("space")  # Claude Code's /voice tap
 
@@ -420,13 +465,17 @@ def _finish_respond(focused_key) -> None:
     _run(player.respond_finished(focused_key))
 
 
-def _intercept(control: str) -> bool:
+def _intercept(control: str, claimed: list) -> bool:
+    """`claimed[0]` goes True once listening mode owns the control, so a later
+    exception still swallows it (falling through sends Enter in a terminal)."""
     if control == "talon":
-        _listening_off(_Focus())
+        claimed[0] = True
+        _listening_off()
         return True
     if control == "voice":
         if not _in_claude_terminal():
             return False  # Superwhisper behaves as before
+        claimed[0] = True
         focused = _Focus()
         if _responding:
             _finish_respond(focused())
@@ -439,6 +488,7 @@ def _intercept(control: str) -> bool:
     key = focused()
     if not player.has_something(key):
         return False  # normal per-app meaning
+    claimed[0] = True
     if control == "knob_press":
         _run(player.go_ahead(key))
     elif control == "back":
@@ -537,7 +587,7 @@ class Actions:
     def listening_off():
         """Leave listening mode and return to command mode"""
         with _lock:
-            _listening_off(_Focus())
+            _listening_off()
 
     def listening_go_ahead():
         """Play the focused session's newest unheard reply, or resume"""
@@ -583,9 +633,10 @@ class Actions:
         """True if listening mode handled this Ulanzi control"""
         if not _on:
             return False
+        claimed = [False]
         try:
             with _lock:
-                return _intercept(control)
+                return _intercept(control, claimed)
         except Exception as e:
             _log(f"intercepting {control} failed: {e!r}")
-            return False
+            return claimed[0]

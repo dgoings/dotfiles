@@ -146,6 +146,14 @@ class Store:
     def save_session(self, state: SessionState) -> None:
         _atomic_write(self._session_path(state.key), json.dumps(asdict(state)))
 
+    def clear_awaiting_all(self) -> None:
+        """No session is waiting for an answer any more (listening off)."""
+        for path in sorted((self.root / "sessions").glob("*.json")):
+            data = _read_json(path)
+            if isinstance(data, dict) and data.get("awaiting_response"):
+                data["awaiting_response"] = False
+                _atomic_write(path, json.dumps(data))
+
     # events
     def push_event(self, type: str, session_key: str, **data) -> None:
         payload = {**data, "type": type, "session_key": session_key}
