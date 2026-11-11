@@ -309,7 +309,7 @@ If a blocked case fires no Notification at all, note it. Task 4 covers only the 
 **Interfaces:**
 - Produces `install.py [--settings PATH] [--skills-dir PATH] [--uninstall]`, with defaults `~/.claude/settings.json` and `~/.claude/skills`. It:
   - backs up the settings file to `settings.json.bak-listening-<timestamp>`;
-  - adds hooks idempotently, identified by the command containing `/.listening/listen.py`: `Stop` (async, `<python> <repo>/.listening/listen.py hook-stop`), `Notification` (async; matcher = the `|`-joined types from `NEEDS_YOU`), and `UserPromptSubmit` (sync, timeout 5). `<python>` is the absolute path of the interpreter running `install.py`.
+  - adds hooks idempotently, identified by the command containing `/.listening/listen.py`: `Stop` (async, `<python> <repo>/.listening/listen.py hook-stop`), `Notification` (async; matcher `permission_prompt`, the only type Task 1 saw for blocked cases), and `UserPromptSubmit` (sync, timeout 5). `<python>` is the absolute path of the interpreter running `install.py`.
   - symlinks `<skills-dir>/listen` to `.listening/skill/listen`.
   - `--uninstall` removes only those hooks and the link.
 - `SKILL.md`:
@@ -327,7 +327,7 @@ If a blocked case fires no Notification at all, note it. Task 4 covers only the 
   - how to turn listening mode on and off;
   - the commands and Ulanzi table;
   - downloading a Premium voice;
-  - which blocked cases do or don't chime (from Task 1);
+  - which blocked cases chime (from Task 1: all three, but only if still unanswered after about 6 seconds);
   - `install.py --uninstall`.
 - [ ] **Step 4:** Run all tests. Expected: pass.
 - [ ] **Step 5:** With Dylan's go-ahead, run `/opt/homebrew/bin/python3 .listening/install.py`. Check that `python3 -m json.tool ~/.claude/settings.json` parses and that `ls -l ~/.claude/skills/listen` points into the repo.
@@ -343,7 +343,7 @@ No new files unless something fails. Fix failures in the task that owns the code
 - [ ] **Step 2: Background tab.** Start a task in a second Ghostty tab and switch away. It gives a soft chime. Switch back with "tab next", and "go ahead" plays it.
 - [ ] **Step 3: Respond.** Mid-reply, press the voice key, speak, then press it again (it sends). Claude's answer chimes and plays on its own. Claude's answer should show it knew which section you were on.
 - [ ] **Step 4: Walkthrough.** With listening off, ask "walk me through docs/2026-11-10-listening-mode-design.md". Listening turns on and it starts playing. Respond mid-walkthrough: the answer plays, then "Back to the walkthrough." and the next section.
-- [ ] **Step 5: Needs you.** Trigger a permission prompt. It gives a needs-you chime and the spoken line. The knob moves through the prompt's options as usual, and the knob press approves.
+- [ ] **Step 5: Needs you.** Trigger a blocked case (Dylan runs in auto mode, so ask for a multiple-choice question or a plan) and leave it unanswered for over 6 seconds. It gives a needs-you chime and the spoken line. The knob moves through the prompt's options as usual, and the knob press approves.
 - [ ] **Step 6: Rex.** Repeat Step 1 in Rex.
 - [ ] **Step 7: Off means off.** Say "listening off". A normal Claude reply gives no chime and nothing is written to `events/`. The Ulanzi behaves as before.
 - [ ] **Step 8:** Commit any fixes. Update the spec's Status line to `implemented`.
