@@ -6,7 +6,7 @@ description: Speak a document or other content aloud as a walkthrough through Ta
 # Listen: spoken walkthrough
 
 1. Read `~/.talon/user/dylan/listening/style_guide.md` and follow it. This is review mode: cover all of the substance, in the original's order.
-2. Do steps 2 to 4 in ONE Bash call (shell variables don't survive between calls). Create a temp file with `mktemp`, write the sections JSON into it with a quoted heredoc, run listen.py with the file as stdin, and delete the file only if it exits 0:
+2. Do this in ONE Bash call (shell variables don't survive between calls). Create a temp file with `mktemp`, write the sections JSON into it with a quoted heredoc, run listen.py with the file as stdin, and delete the file only if it exits 0:
 
    ```
    f=$(mktemp)
