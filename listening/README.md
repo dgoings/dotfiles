@@ -13,7 +13,7 @@ Claude Code replies are rewritten for the ear and spoken through Talon, so you c
 
 This backs up `~/.claude/settings.json` (to `settings.json.bak-listening-<timestamp>`), adds a Stop, a Notification (`permission_prompt`) and a UserPromptSubmit hook, and links `~/.claude/skills/listen` to `.listening/skill/listen`. It only adds; existing hooks stay. Running it again changes nothing. Running sessions pick the hooks up without a restart.
 
-Options: `--settings PATH`, `--skills-dir PATH`, `--python PATH` (default `/opt/homebrew/bin/python3`, written verbatim into the hook commands; must be Python 3.10 or newer). It refuses to replace a `listen` skill folder that isn't its own link.
+Options: `--settings PATH`, `--skills-dir PATH`, `--python PATH` (default `/opt/homebrew/bin/python3`, written verbatim into the hook commands; must be Python 3.10 or newer). SKILL.md uses `/opt/homebrew/bin/python3`, so a different `--python` also needs that line edited. It refuses to replace a `listen` skill folder that isn't its own link.
 
 Remove everything it added (hooks and link only, with another backup):
 
@@ -37,7 +37,7 @@ Saying "respond" starts dictation. End it with the voice-key shortcut (not plain
 
 ## Ulanzi AU05 as a remote
 
-Active only while the focused session has something to hear (playing, paused, or an unheard reply or walkthrough waiting) and isn't blocked. Otherwise the controls keep their normal per-app meanings.
+The knob (turn and press) and key 3 act as a remote only while the focused session has something to hear (playing, paused, or an unheard reply or walkthrough waiting) and isn't blocked; otherwise they keep their normal per-app meanings. While listening mode is on, the Talon key always leaves listening mode, and the voice key always starts or ends a response in a Claude terminal (Ghostty or Rex).
 
 | Control | Does | Shortcut |
 |---|---|---|

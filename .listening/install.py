@@ -96,6 +96,20 @@ def is_our_link(link: Path) -> bool:
     return link.is_symlink() and link.resolve() == SKILL_SRC.resolve()
 
 
+def shape_problem(settings) -> str:
+    if not isinstance(settings, dict):
+        return "settings JSON is not an object"
+    hooks = settings.get("hooks")
+    if hooks is None:
+        return ""
+    if not isinstance(hooks, dict):
+        return "\"hooks\" is not an object"
+    for event, groups in hooks.items():
+        if not isinstance(groups, list):
+            return f"hooks.{event} is not a list"
+    return ""
+
+
 def write_settings(path: Path, settings: dict) -> None:
     tmp = path.with_name(path.name + ".tmp-listening")
     tmp.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
@@ -132,6 +146,10 @@ def main(argv=None) -> int:
         except ValueError as e:
             print(f"{settings_path} is not valid JSON ({e}); not changing anything.",
                   file=sys.stderr)
+            return 1
+        problem = shape_problem(settings)
+        if problem:
+            print(f"{settings_path}: {problem}; not changing anything.", file=sys.stderr)
             return 1
         stamp = time.strftime("%Y%m%d-%H%M%S")
         backup = settings_path.with_name(f"{settings_path.name}.bak-listening-{stamp}")

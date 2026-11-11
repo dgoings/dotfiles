@@ -94,3 +94,11 @@ def test_refuses_foreign_skill_dir(env, capsys):
     assert env[0].read_text() == before
     assert not list(env[0].parent.glob("settings.json.bak-*"))
     assert "listen" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("content", ['[1, 2]', '{"hooks": {"Stop": {"a": 1}}}', '{"hooks": []}'])
+def test_refuses_odd_settings_shape(env, content, capsys):
+    env[0].write_text(content)
+    assert run(env) == 1
+    assert env[0].read_text() == content
+    assert not list(env[0].parent.glob("settings.json.bak-*"))
