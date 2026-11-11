@@ -115,6 +115,16 @@ class Store:
         except (KeyError, TypeError):
             return None
 
+    def load_written(self, reply_id: str) -> tuple[str, str] | None:
+        """(session_key, written text) of a reply, or None if missing/corrupt."""
+        folder = self._reply_dir(reply_id)
+        meta = _read_json(folder / "meta.json")
+        try:
+            written = (folder / "written.md").read_text()
+            return meta["session_key"], written
+        except (OSError, KeyError, TypeError):
+            return None
+
     def prune(self, keep: int = 50) -> None:
         folders = sorted(p for p in (self.root / "replies").glob("*") if p.is_dir())
         for old in folders[: max(0, len(folders) - keep)]:

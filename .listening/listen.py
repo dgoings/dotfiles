@@ -9,16 +9,20 @@ deliberate non-zero exit is `walkthrough` with invalid sections JSON (exit 2).
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "listening"))
 
 from core.session import default_parent_of, default_tty_of, own_session_key  # noqa: E402
-from core.spoken import SpokenFormatError, parse_sections  # noqa: E402
+from core.spoken import SpokenFormatError, fallback_sections, parse_sections  # noqa: E402
 from core.store import Store  # noqa: E402
 
 TAIL_BYTES = 256 * 1024
+STYLE_GUIDE = Path(__file__).resolve().parent.parent / "listening" / "style_guide.md"
+DEFAULT_REWRITE_TIMEOUT = 90.0
 
 LINE_PERMISSION = "Claude needs you to approve something."
 LINE_QUESTION = "Claude has a question for you."
@@ -158,6 +162,114 @@ def cmd_hook_notify(args) -> None:
     store.push_event("needs_you", key, line=line)
 
 
+def cmd_hook_stop(args) -> None:
+    store = Store()
+    if not store.is_on():
+        return
+    payload = read_payload()
+    if payload.get("stop_hook_active"):
+        return
+    key = session_key()
+    if not key:
+        return
+    state = store.session(key)
+    suppressed = state.suppress_next_stop
+    if state.blocked or suppressed:
+        state.blocked = False
+        state.suppress_next_stop = False
+        store.save_session(state)
+    if suppressed:
+        return
+    message = payload.get("last_assistant_message")
+    if not isinstance(message, str) or not message.strip():
+        return
+    reply_id = store.create_reply(key, "reply", message)
+    subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve()), "rewrite", reply_id],
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def claude_binary() -> str:
+    return (
+        os.environ.get("LISTENING_CLAUDE_BIN")
+        or shutil.which("claude")
+        or str(Path.home() / ".local" / "bin" / "claude")
+    )
+
+
+def rewrite_timeout() -> float:
+    try:
+        return float(os.environ.get("LISTENING_REWRITE_TIMEOUT", DEFAULT_REWRITE_TIMEOUT))
+    except ValueError:
+        return DEFAULT_REWRITE_TIMEOUT
+
+
+def haiku_sections(store: Store, written: str):
+    """Sections from the nested Haiku call, or None on any failure."""
+    prompt = (
+        STYLE_GUIDE.read_text()
+        + "\n\nThis is update mode: rewrite the following reply for listening.\n\n"
+        + written
+    )
+    try:
+        done = subprocess.run(
+            [
+                claude_binary(),
+                "--settings",
+                '{"disableAllHooks": true}',
+                "-p",
+                "--model",
+                "haiku",
+                "--tools",
+                "",
+                "--no-session-persistence",
+                "--max-turns",
+                "1",
+                "--output-format",
+                "json",
+                prompt,
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=rewrite_timeout(),
+            cwd=store.root,
+            env={**os.environ, "LISTENING_NESTED": "1"},
+        )
+        if done.returncode != 0:
+            return None
+        out = json.loads(done.stdout)
+        if not isinstance(out, dict) or out.get("is_error") is True:
+            return None
+        result = out.get("result")
+        if not isinstance(result, str):
+            return None
+        return parse_sections(result)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None  # includes timeout, bad JSON and SpokenFormatError
+
+
+def cmd_rewrite(args) -> None:
+    store = Store()
+    loaded = store.load_written(args.reply_id)
+    if loaded is None:
+        return
+    key, written = loaded
+    sections = haiku_sections(store, written) or fallback_sections(written)
+    if not sections:
+        return
+    store.save_sections(args.reply_id, sections)
+    state = store.session(key)
+    state.unheard = args.reply_id
+    store.save_session(state)
+    store.push_event("reply_ready", key, reply_id=args.reply_id)
+    store.prune()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="listen.py")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -168,6 +280,10 @@ def build_parser() -> argparse.ArgumentParser:
     w.set_defaults(func=cmd_walkthrough)
     sub.add_parser("hook-prompt").set_defaults(func=cmd_hook_prompt)
     sub.add_parser("hook-notify").set_defaults(func=cmd_hook_notify)
+    sub.add_parser("hook-stop").set_defaults(func=cmd_hook_stop)
+    r = sub.add_parser("rewrite")
+    r.add_argument("reply_id")
+    r.set_defaults(func=cmd_rewrite)
     return parser
 
 

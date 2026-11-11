@@ -151,3 +151,143 @@ def test_last_tool_use_name_partial_first_line(tmp_path):
     p.write_text((filler + "\n") * 600 + entry + "\n")  # > 256 KB
     assert mod.last_tool_use_name(str(p)) == "AskUserQuestion"
     assert mod.last_tool_use_name(str(tmp_path / "missing")) is None
+
+
+# ---- Task 5: stop hook and rewrite worker ----
+
+SECTIONS = {"sections": [{"title": "Fake", "text": "Spoken by the fake."}]}
+WRITTEN = "## Heading\n\nSome written reply text for the fallback."
+
+
+@pytest.fixture
+def fake_claude(tmp_path):
+    path = tmp_path / "fake-claude"
+    path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys, time\n"
+        "rec = os.environ.get('FAKE_RECORD')\n"
+        "if rec:\n"
+        "    json.dump({'argv': sys.argv[1:], 'nested': os.environ.get('LISTENING_NESTED')}, open(rec, 'w'))\n"
+        "mode = os.environ.get('FAKE_MODE', 'ok')\n"
+        "if mode == 'fail':\n"
+        "    sys.exit(1)\n"
+        "if mode == 'sleep':\n"
+        "    time.sleep(5)\n"
+        "if mode == 'garbage':\n"
+        "    print('not json')\n"
+        "    sys.exit(0)\n"
+        "print(json.dumps({'result': json.dumps(" + repr(SECTIONS) + ")}))\n"
+    )
+    path.chmod(0o755)
+    return path
+
+
+def make_reply(store, written=WRITTEN):
+    return store.create_reply(KEY, "reply", written)
+
+
+def rewrite(store, fake, rid, mode="ok", **extra):
+    env = {"LISTENING_CLAUDE_BIN": str(fake), "FAKE_MODE": mode, **extra}
+    return run(store, "rewrite", rid, env_extra=env)
+
+
+def test_stop_hook_returns_fast(store, fake_claude):
+    import time
+
+    store.set_on(True)
+    payload = json.dumps({"last_assistant_message": "Hello."})
+    t = time.monotonic()
+    r = run(
+        store,
+        "hook-stop",
+        stdin=payload,
+        env_extra={"LISTENING_CLAUDE_BIN": str(fake_claude), "FAKE_MODE": "sleep"},
+    )
+    assert r.returncode == 0, r.stderr
+    assert time.monotonic() - t < 1
+    assert (store.root / "replies").exists() and len(list((store.root / "replies").iterdir())) == 1
+
+
+def test_rewrite_saves_sections_and_event(store, fake_claude):
+    rid = make_reply(store)
+    r = rewrite(store, fake_claude, rid)
+    assert r.returncode == 0, r.stderr
+    reply = store.load_reply(rid)
+    assert [(s.title, s.text) for s in reply.sections] == [("Fake", "Spoken by the fake.")]
+    assert store.session(KEY).unheard == rid
+    events = store.pop_events()
+    assert [e["type"] for e in events] == ["reply_ready"]
+    assert events[0]["reply_id"] == rid
+
+
+@pytest.mark.parametrize("mode", ["fail", "garbage"])
+def test_rewrite_falls_back_on_failure(store, fake_claude, mode):
+    from core.spoken import fallback_sections
+
+    rid = make_reply(store)
+    rewrite(store, fake_claude, rid, mode=mode)
+    assert store.load_reply(rid).sections == fallback_sections(WRITTEN)
+    assert event_types(store) == ["reply_ready"]
+
+
+def test_rewrite_falls_back_on_timeout(store, fake_claude):
+    from core.spoken import fallback_sections
+
+    rid = make_reply(store)
+    rewrite(store, fake_claude, rid, mode="sleep", LISTENING_REWRITE_TIMEOUT="1")
+    assert store.load_reply(rid).sections == fallback_sections(WRITTEN)
+    assert event_types(store) == ["reply_ready"]
+
+
+def test_rewrite_blank_reply_saves_nothing(store, fake_claude):
+    rid = make_reply(store, "   \n")
+    rewrite(store, fake_claude, rid, mode="fail")
+    assert store.load_reply(rid) is None
+    assert store.pop_events() == []
+
+
+def test_rewrite_passes_no_hooks_and_nested_env(store, fake_claude, tmp_path):
+    record = tmp_path / "record.json"
+    rid = make_reply(store)
+    rewrite(store, fake_claude, rid, FAKE_RECORD=str(record))
+    seen = json.loads(record.read_text())
+    argv = seen["argv"]
+    assert argv[argv.index("--settings") + 1] == '{"disableAllHooks": true}'
+    assert argv[argv.index("--model") + 1] == "haiku"
+    assert seen["nested"] == "1"
+    assert WRITTEN in argv[-1]
+
+
+def test_stop_suppressed_after_walkthrough(store):
+    store.set_on(True)
+    state = store.session(KEY)
+    state.suppress_next_stop = True
+    state.blocked = True
+    store.save_session(state)
+    r = run(store, "hook-stop", stdin=json.dumps({"last_assistant_message": "Hi"}))
+    assert r.returncode == 0
+    assert not (store.root / "replies").exists() or not list((store.root / "replies").iterdir())
+    after = store.session(KEY)
+    assert after.suppress_next_stop is False
+    assert after.blocked is False
+
+
+def test_stop_hook_active_noops(store):
+    store.set_on(True)
+    r = run(
+        store,
+        "hook-stop",
+        stdin=json.dumps({"stop_hook_active": True, "last_assistant_message": "Hi"}),
+    )
+    assert r.returncode == 0
+    assert not (store.root / "replies").exists() or not list((store.root / "replies").iterdir())
+
+
+def test_stop_clears_blocked_and_noops_on_empty(store):
+    store.set_on(True)
+    state = store.session(KEY)
+    state.blocked = True
+    store.save_session(state)
+    run(store, "hook-stop", stdin=json.dumps({"last_assistant_message": "  "}))
+    assert store.session(KEY).blocked is False
+    assert not (store.root / "replies").exists() or not list((store.root / "replies").iterdir())

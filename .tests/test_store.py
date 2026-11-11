@@ -72,3 +72,9 @@ def test_session_key_with_slashes_round_trips(store):
     store.save_session(state)
     again = store.session("tty:/dev/ttys003")
     assert again.key == "tty:/dev/ttys003" and again.blocked is True
+
+
+def test_load_written(store):
+    rid = store.create_reply("rex:block:x", "reply", "hello there")
+    assert store.load_written(rid) == ("rex:block:x", "hello there")
+    assert store.load_written("nope") is None
