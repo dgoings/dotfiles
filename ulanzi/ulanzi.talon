@@ -24,5 +24,10 @@ key(ctrl-alt-shift-cmd-l): user.ulanzi_control("knob_right")
 key(ctrl-alt-shift-cmd-k): user.ulanzi_control("knob_press")
 
 settings():
-    # On-screen dot showing whether Talon is awake or asleep.
+    # On-screen dot showing Talon's mode: blue command, grey asleep,
+    # purple listening, black while the listening voice speaks.
     user.mode_indicator_show = true
+    # Middle of the right edge (community's top-center default hides behind
+    # the MacBook camera notch).
+    user.mode_indicator_x = 1
+    user.mode_indicator_y = 0.5
