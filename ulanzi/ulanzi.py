@@ -45,8 +45,35 @@ def _superwhisper_running() -> bool:
     return result.returncode == 0
 
 
+def _listening_takes(name: str) -> bool:
+    """Listening mode (listening/listening.py) can take over a control. If
+    that module is missing or broken, the control keeps its normal meaning."""
+    try:
+        return bool(actions.user.listening_intercept(name))
+    except Exception as e:
+        print(f"ulanzi: listening_intercept({name!r}) failed: {e!r}")
+        return False
+
+
 @mod.action_class
 class Actions:
+    def ulanzi_control(name: str):
+        """Run one Ulanzi control: voice, talon, back, knob_left, knob_right or knob_press"""
+        if _listening_takes(name):
+            return
+        if name == "voice":
+            actions.user.ulanzi_dictation_toggle()
+        elif name == "talon":
+            actions.user.ulanzi_toggle()
+        elif name == "back":
+            actions.user.ulanzi_back()
+        elif name == "knob_left":
+            actions.user.ulanzi_knob_left()
+        elif name == "knob_right":
+            actions.user.ulanzi_knob_right()
+        elif name == "knob_press":
+            actions.user.ulanzi_knob_press()
+
     def ulanzi_sleep():
         """Put Talon to sleep (same as the "sleep all" voice command)"""
         actions.user.switcher_hide_running()

@@ -9,17 +9,19 @@
 #   Knob press       ctrl+opt+shift+cmd+K   "confirm"
 #
 # What B/J/K/L do per app lives in ulanzi_apps.py (defaults in ulanzi.py).
+# Every control goes through user.ulanzi_control, which lets listening mode
+# (listening/listening.py) take it over first; otherwise it does the above.
 # `mode: all` keeps every control working while Talon is asleep or you're
 # dictating.
 mode: all
 -
 
-key(ctrl-alt-shift-cmd-v): user.ulanzi_dictation_toggle()
-key(ctrl-alt-shift-cmd-t): user.ulanzi_toggle()
-key(ctrl-alt-shift-cmd-b): user.ulanzi_back()
-key(ctrl-alt-shift-cmd-j): user.ulanzi_knob_left()
-key(ctrl-alt-shift-cmd-l): user.ulanzi_knob_right()
-key(ctrl-alt-shift-cmd-k): user.ulanzi_knob_press()
+key(ctrl-alt-shift-cmd-v): user.ulanzi_control("voice")
+key(ctrl-alt-shift-cmd-t): user.ulanzi_control("talon")
+key(ctrl-alt-shift-cmd-b): user.ulanzi_control("back")
+key(ctrl-alt-shift-cmd-j): user.ulanzi_control("knob_left")
+key(ctrl-alt-shift-cmd-l): user.ulanzi_control("knob_right")
+key(ctrl-alt-shift-cmd-k): user.ulanzi_control("knob_press")
 
 settings():
     # On-screen dot showing whether Talon is awake or asleep.
