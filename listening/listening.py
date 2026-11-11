@@ -591,31 +591,37 @@ class Actions:
 
     def listening_go_ahead():
         """Play the focused session's newest unheard reply, or resume"""
+        _log("heard: go ahead")
         with _lock:
             _run(player.go_ahead(_Focus()()))
 
     def listening_continue():
         """Play the next section"""
+        _log("heard: continue")
         with _lock:
             _run(player.continue_(_Focus()()))
 
     def listening_repeat():
         """Play this section again"""
+        _log("heard: repeat")
         with _lock:
             _run(player.repeat(_Focus()()))
 
     def listening_back():
         """Go back a section"""
+        _log("heard: back")
         with _lock:
             _run(player.back(_Focus()()))
 
     def listening_skip():
         """Skip to the next section"""
+        _log("heard: skip")
         with _lock:
             _run(player.skip(_Focus()()))
 
     def listening_stop():
         """Stop playback; the rest stays available"""
+        _log("heard: stop")
         with _lock:
             _run(player.stop())
 

@@ -11,7 +11,12 @@ from .store import Reply, SessionState, Store
 
 CANT_TELL = "I can't tell which Claude session is in front."
 NOTHING_NEW = "Nothing new here."
+NOTHING_LEFT = "Nothing left to hear."
 EVERYTHING = " That's everything."
+# Said by the player (not the rewrite) at every pause, so Dylan always hears
+# whether more is coming.
+HANDOFF = " Want me to keep going?"
+HANDOFF_WALKTHROUGH = " Any thoughts before I move on?"
 BACK_TO_WALKTHROUGH = "Back to the walkthrough. "
 
 
@@ -97,7 +102,9 @@ class Player:
             return self._play(self.index)
         if self.key is None and focused_key is not None:
             return self.go_ahead(focused_key)  # nothing current: same as go ahead
-        return []
+        if self.phase in ("speaking", "responding"):
+            return []
+        return [Speak(NOTHING_LEFT)]  # heard, but the reply is done
 
     def repeat(self, focused_key: str | None = None) -> list[Effect]:
         if self.last_played is None or self.phase == "responding":
@@ -271,10 +278,13 @@ class Player:
         return [Deafen(), Speak(text)]
 
     def _section_text(self, reply: Reply, index: int, prefix: str = "") -> str:
-        """Section `index` as spoken: with the prefix, and " That's everything."
-        on the last section when nothing follows."""
+        """Section `index` as spoken: with the prefix, a handoff question when
+        playback will pause after it, and " That's everything." on the last
+        section when nothing follows."""
         text = prefix + reply.sections[index].text
-        if index == len(reply.sections) - 1 and self._nothing_follows(reply):
+        if index < len(reply.sections) - 1:
+            text += HANDOFF_WALKTHROUGH if reply.kind == "walkthrough" else HANDOFF
+        elif self._nothing_follows(reply):
             text += EVERYTHING
         return text
 

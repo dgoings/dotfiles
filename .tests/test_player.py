@@ -4,6 +4,8 @@ from core.store import Section
 KEY = "tty:/dev/ttys003"
 OTHER = "tty:/dev/ttys004"
 CANT_TELL = "I can't tell which Claude session is in front."
+HANDOFF = " Want me to keep going?"
+REACT = " Any thoughts before I move on?"
 
 
 def make_reply(store, key, texts, kind="reply", title=None):
@@ -43,7 +45,7 @@ def play(text):
 def test_go_ahead_plays_first_section_then_waits(store):
     add_unheard(store, KEY, ["one", "two"])
     p = Player(store)
-    assert p.go_ahead(KEY) == play("one")
+    assert p.go_ahead(KEY) == play("one" + HANDOFF)
     assert p.phase == "speaking"
     assert p.section_finished() == [Listen()]
     assert p.phase == "waiting"
@@ -54,13 +56,13 @@ def test_continue_repeat_back_skip(store):
     p = Player(store)
     p.go_ahead(KEY)
     p.section_finished()
-    assert p.continue_() == play("two")
+    assert p.continue_() == play("two" + HANDOFF)
     p.section_finished()
-    assert p.repeat() == play("two")
+    assert p.repeat() == play("two" + HANDOFF)
     p.section_finished()
-    assert p.back() == play("one")
+    assert p.back() == play("one" + HANDOFF)
     p.section_finished()
-    assert p.skip() == [StopSpeech(), Deafen(), Speak("two")]
+    assert p.skip() == [StopSpeech(), Deafen(), Speak("two" + HANDOFF)]
 
 
 def test_last_section_adds_thats_everything(store):
@@ -90,7 +92,7 @@ def test_unheard_beats_walkthrough_then_walkthrough_resumes(store):
     p = Player(store)
     assert p.go_ahead(KEY) == play("answer")
     assert store.session(KEY).unheard is None
-    assert p.section_finished() == play("Back to the walkthrough. w2")
+    assert p.section_finished() == play("Back to the walkthrough. w2" + REACT)
     assert store.session(KEY).walkthrough_pos == 2
     assert p.section_finished() == [Listen()]
     assert p.continue_() == play("w3 That's everything.")
@@ -194,7 +196,7 @@ def test_stop_keeps_position_for_go_ahead(store):
     p.section_finished()
     assert p.stop() == [StopSpeech(), Listen()]
     assert p.phase == "idle"
-    assert p.go_ahead(KEY) == play("two")
+    assert p.go_ahead(KEY) == play("two" + HANDOFF)
 
 
 def test_unheard_replaces_paused_position(store):
@@ -218,13 +220,13 @@ def test_go_ahead_while_waiting_continues(store):
 def test_go_ahead_resumes_walkthrough_at_saved_pos(store):
     add_walkthrough(store, KEY, ["w1", "w2", "w3"], pos=1)
     p = Player(store)
-    assert p.go_ahead(KEY) == play("w2")
+    assert p.go_ahead(KEY) == play("w2" + REACT)
     assert store.session(KEY).walkthrough_pos == 2
 
 
-def test_continue_with_nothing_does_nothing(store):
+def test_continue_with_nothing_says_nothing_left(store):
     p = Player(store)
-    assert p.continue_() == []
+    assert p.continue_() == [Speak("Nothing left to hear.")]
     assert p.repeat() == []
     assert p.back() == []
     assert p.skip() == []
@@ -235,14 +237,14 @@ def test_back_stays_at_first_section(store):
     p = Player(store)
     p.go_ahead(KEY)
     p.section_finished()
-    assert p.back() == play("one")
+    assert p.back() == play("one" + HANDOFF)
 
 
 def test_repeat_while_speaking_stops_first(store):
     add_unheard(store, KEY, ["one", "two"])
     p = Player(store)
     p.go_ahead(KEY)
-    assert p.repeat() == [StopSpeech(), Deafen(), Speak("one")]
+    assert p.repeat() == [StopSpeech(), Deafen(), Speak("one" + HANDOFF)]
 
 
 def test_skip_past_last_section_finishes(store):
@@ -303,7 +305,7 @@ def test_respond_mid_walkthrough_context_and_resume(store):
         Deafen(),
         Speak("answer"),
     ]
-    assert p.section_finished() == play("Back to the walkthrough. w2")
+    assert p.section_finished() == play("Back to the walkthrough. w2" + REACT)
 
 
 def test_untitled_walkthrough_and_section(store):
@@ -365,7 +367,7 @@ def test_awaited_answer_plays_after_current_section(store):
     p.go_ahead(KEY)
     p.respond_started(KEY)
     p.respond_finished(KEY)
-    assert p.go_ahead(KEY) == play("w2")
+    assert p.go_ahead(KEY) == play("w2" + REACT)
     rid = add_unheard(store, KEY, ["answer"])
     assert p.handle_event(ready(KEY, rid), KEY) == [Chime("done", False)]
     assert p.section_finished() == play("answer")
@@ -379,7 +381,7 @@ def test_walkthrough_ready(store):
     p.section_finished()  # waiting on the old reply; the new walkthrough wins
     rid = add_walkthrough(store, KEY, ["w1", "w2"])
     event = {"type": "walkthrough_ready", "session_key": KEY, "reply_id": rid}
-    assert p.handle_event(event, KEY) == play("w1")
+    assert p.handle_event(event, KEY) == play("w1" + REACT)
     assert Player(store).handle_event(event, OTHER) == [Chime("done", True)]
 
 
@@ -467,7 +469,7 @@ def test_focused_walkthrough_ready_clears_awaiting(store):
     p.respond_finished(KEY)
     rid = add_walkthrough(store, KEY, ["w1", "w2"])
     event = {"type": "walkthrough_ready", "session_key": KEY, "reply_id": rid}
-    assert p.handle_event(event, KEY) == play("w1")
+    assert p.handle_event(event, KEY) == play("w1" + REACT)
     assert store.session(KEY).awaiting_response is False
 
 
@@ -495,9 +497,9 @@ def test_stop_mid_section_replays_it(store):
     p.continue_()  # w2 starts: walkthrough_pos 2
     assert p.stop() == [StopSpeech(), Listen()]
     assert store.session(KEY).walkthrough_pos == 1
-    assert p.go_ahead(KEY) == play("w2")
+    assert p.go_ahead(KEY) == play("w2" + REACT)
     p.stop()
-    assert Player(store).go_ahead(KEY) == play("w2")  # from the store, too
+    assert Player(store).go_ahead(KEY) == play("w2" + REACT)  # from the store, too
 
 
 def test_stop_while_responding_does_nothing(store):
@@ -521,12 +523,12 @@ def waiting_on_section_two(store):
 
 def test_continue_with_no_focus_keeps_current_session(store):
     p = waiting_on_section_two(store)  # then he switched to Slack
-    assert p.continue_(None) == play("two")
+    assert p.continue_(None) == play("two" + HANDOFF)
 
 
 def test_continue_in_same_tab_plays_next(store):
     p = waiting_on_section_two(store)
-    assert p.continue_(KEY) == play("two")
+    assert p.continue_(KEY) == play("two" + HANDOFF)
 
 
 def test_continue_in_other_claude_tab_plays_that_tab(store):
@@ -539,7 +541,7 @@ def test_continue_in_other_claude_tab_plays_that_tab(store):
 def test_continue_with_no_focus_resumes_paused_session(store):
     p = waiting_on_section_two(store)
     p.stop()
-    assert p.continue_(None) == play("two")
+    assert p.continue_(None) == play("two" + HANDOFF)
 
 
 def test_continue_with_no_session_goes_ahead_in_focused_tab(store):
@@ -547,13 +549,13 @@ def test_continue_with_no_session_goes_ahead_in_focused_tab(store):
     assert Player(store).continue_(KEY) == play("fresh That's everything.")
 
 
-def test_continue_with_no_session_and_no_focus_does_nothing(store):
-    assert Player(store).continue_(None) == []
+def test_continue_with_no_session_and_no_focus_says_nothing_left(store):
+    assert Player(store).continue_(None) == [Speak("Nothing left to hear.")]
 
 
 def test_repeat_with_no_focus_repeats_current(store):
     p = waiting_on_section_two(store)
-    assert p.repeat(None) == play("one")
+    assert p.repeat(None) == play("one" + HANDOFF)
 
 
 def test_repeat_in_other_claude_tab_does_nothing(store):
@@ -568,9 +570,9 @@ def test_back_and_skip_with_no_focus_act_on_current(store):
     p = waiting_on_section_two(store)
     p.continue_(None)
     p.section_finished()
-    assert p.back(None) == play("one")
+    assert p.back(None) == play("one" + HANDOFF)
     p.section_finished()
-    assert p.skip(None) == [StopSpeech(), Deafen(), Speak("two")]
+    assert p.skip(None) == [StopSpeech(), Deafen(), Speak("two" + HANDOFF)]
 
 
 def test_knob_while_speaking_acts_whichever_tab_is_in_front(store):
@@ -591,11 +593,11 @@ def test_next_text_mid_reply(store):
     add_unheard(store, KEY, ["one", "two", "three"])
     p = Player(store)
     p.go_ahead(KEY)
-    assert p.next_text() == "two"
-    assert p.next_text() == "two"  # pure: asking twice changes nothing
+    assert p.next_text() == "two" + HANDOFF
+    assert p.next_text() == "two" + HANDOFF  # pure: asking twice changes nothing
     assert (p.phase, p.index, p.last_played) == ("speaking", 1, 0)
     p.section_finished()
-    assert p.continue_() == play("two")
+    assert p.continue_() == play("two" + HANDOFF)
 
 
 def test_next_text_last_section_is_none(store):
@@ -614,9 +616,9 @@ def test_next_text_includes_back_to_walkthrough_prefix(store):
     add_unheard(store, KEY, ["answer"])
     p = Player(store)
     p.go_ahead(KEY)
-    assert p.next_text() == "Back to the walkthrough. w2"
+    assert p.next_text() == "Back to the walkthrough. w2" + REACT
     assert store.session(KEY).walkthrough_pos == 1  # pure
-    assert spoken(p.section_finished()) == "Back to the walkthrough. w2"
+    assert spoken(p.section_finished()) == "Back to the walkthrough. w2" + REACT
 
 
 def test_next_text_includes_thats_everything_suffix(store):
@@ -674,14 +676,14 @@ def test_prompt_sent_is_ignored(store):
 
 def test_go_ahead_with_no_focus_resumes_when_waiting(store):
     p = waiting_on_section_two(store)
-    assert p.go_ahead(None) == play("two")
+    assert p.go_ahead(None) == play("two" + HANDOFF)
 
 
 def test_go_ahead_with_no_focus_resumes_when_paused(store):
     p = waiting_on_section_two(store)
     p.continue_()
     p.stop()  # stopped mid "two": paused on it
-    assert p.go_ahead(None) == play("two")
+    assert p.go_ahead(None) == play("two" + HANDOFF)
 
 
 def test_go_ahead_with_no_focus_and_nothing_paused_cant_tell(store):
@@ -701,3 +703,58 @@ def test_reset_clears_awaiting_in_every_session(store):
     p = Player(store)
     assert p.reset() == [StopSpeech()]
     assert [store.session(k).awaiting_response for k in (KEY, OTHER, third)] == [False] * 3
+
+
+# --- spoken cues (handoff and nothing left) ------------------------------------
+
+
+def test_paused_reply_section_ends_with_handoff(store):
+    add_unheard(store, KEY, ["one", "two"])
+    p = Player(store)
+    assert p.go_ahead(KEY) == play("one" + HANDOFF)
+    p.section_finished()
+    assert p.continue_() == play("two That's everything.")
+
+
+def test_paused_walkthrough_section_invites_reaction(store):
+    add_walkthrough(store, KEY, ["w1", "w2"])
+    p = Player(store)
+    assert p.go_ahead(KEY) == play("w1" + REACT)
+
+
+def test_reply_before_walkthrough_gets_no_handoff(store):
+    # the reply's last section runs straight on into the walkthrough
+    add_walkthrough(store, KEY, ["w1", "w2"], pos=1)
+    add_unheard(store, KEY, ["answer"])
+    p = Player(store)
+    assert p.go_ahead(KEY) == play("answer")
+
+
+def test_next_text_includes_handoff(store):
+    add_unheard(store, KEY, ["one", "two", "three"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    assert p.next_text() == "two" + HANDOFF  # prefetch renders the cue too
+
+
+def test_continue_with_nothing_left_says_so(store):
+    add_unheard(store, KEY, ["one"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    p.section_finished()
+    assert p.phase == "idle"
+    assert p.continue_(KEY) == [Speak("Nothing new here.")]  # via go ahead
+    assert p.continue_(None) == [Speak("Nothing left to hear.")]
+
+
+def test_continue_with_nothing_ever_played_says_so(store):
+    assert Player(store).continue_(None) == [Speak("Nothing left to hear.")]
+
+
+def test_continue_while_speaking_or_responding_stays_silent(store):
+    add_unheard(store, KEY, ["one", "two"])
+    p = Player(store)
+    p.go_ahead(KEY)
+    assert p.continue_(KEY) == []
+    p.respond_started(KEY)
+    assert p.continue_(KEY) == []

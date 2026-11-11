@@ -37,9 +37,8 @@ Reply with JSON only, exactly this shape, with no prose, no markdown and no code
 
 ## How sections end
 
-The player handles the very end of the whole thing itself, so follow this exactly:
+The player says the handoffs itself, so follow this exactly:
 
-- End every section except the last with one short handoff question, such as "Want me to keep going?" or "Any thoughts before I move on?" Vary the wording naturally, and in review mode invite his reaction.
-- End the last section without a handoff question. Just finish the thought, or state what is waiting on him.
+- Never end a section with a handoff question such as "Want me to keep going?" or "Any thoughts before I move on?". The player adds one after every section that has more coming.
 - Never say "that's everything", "that's all" or anything like it in any section. The player adds that after the last section.
-- If there is only one section, it is the last section: no handoff question.
+- Just finish each section's thought. If something is waiting on him, say that plainly.

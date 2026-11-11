@@ -267,7 +267,9 @@ covers:
   your Talon folder"), not spelled out, unless the exact text matters.
 - Mention when something is waiting for Dylan's decision.
 - End each section with a short handoff ("Want me to keep going?"); the last
-  one says that's everything.
+  one says that's everything. (Update 2026-11-11: the player adds both
+  itself, since Haiku dropped the handoffs, and "continue" with nothing left
+  says "Nothing left to hear.")
 
 ### 7. Which session is focused
 
