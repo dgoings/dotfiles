@@ -84,8 +84,8 @@ const refresh = async ($: EngineInterface, target: ClockTarget | null) => {
 export const register: Register = (on, options) => {
   const configured = Number(options.fableShare)
   const fableShare = Number.isFinite(configured) && configured > 0 ? configured : 0.4
-  const clockUrl = String(options.clockUrl ?? '')
-  const target: ClockTarget | null = /^https?:\/\//.test(clockUrl)
+  const clockUrl = String(options.clockUrl ?? '').trim()
+  const target: ClockTarget | null = /^https?:\/\/[^/\s]+/.test(clockUrl)
     ? { url: `${clockUrl.replace(/\/+$/, '')}/api/custom?name=usage`, fableShare, pushStartedAt: null }
     : null
 

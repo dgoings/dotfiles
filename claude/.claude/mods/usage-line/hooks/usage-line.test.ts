@@ -293,6 +293,21 @@ describe('the clock', () => {
     expect(requests.length).toBe(0)
   })
 
+  test('ignores a clock URL with no host', { options: { clockUrl: 'http://' } }, async ($, on) => {
+    const { clock, requests } = stubWorld(on)
+    await start($)
+    await clock.advance(61_000)
+    expect(requests.length).toBe(0)
+  })
+
+  test('tolerates spaces around the clock URL', { options: { clockUrl: ' http://clock.test ' } }, async ($, on) => {
+    const { clock, requests } = stubWorld(on)
+    await start($)
+    await clock.advance(1_000)
+    expect(requests.length > 0).toBe(true)
+    expect(requests.every(r => r.url === 'http://clock.test/api/custom?name=usage')).toBe(true)
+  })
+
   test('carries on when the clock refuses or errors', CLOCK, async ($, on) => {
     const { clock, setAnswer } = stubWorld(on)
     setAnswer(() => {
@@ -307,10 +322,10 @@ describe('the clock', () => {
   test('does not wait for, or queue behind, a clock that never answers', CLOCK, async ($, on) => {
     const { clock, requests, setAnswer } = stubWorld(on)
     setAnswer(() => new Promise(() => {}))
-    await start($)
+    await start($) // resolves although the first push never settles: a hook does not await it
     await clock.advance(1_000)
     expect(requests.length).toBe(1)
-    await $.session.measure({ context: { window: 1_000_000 }, rateLimits: LIMITS, changed: ['rateLimits'] }) // resolves: not awaiting the push
+    await $.session.measure({ context: { window: 1_000_000 }, rateLimits: LIMITS, changed: ['rateLimits'] })
     expect(requests.length).toBe(1) // skipped: one still in flight
     await clock.advance(60_000)
     expect(requests.length).toBe(2) // the stale one is abandoned after 10 s
