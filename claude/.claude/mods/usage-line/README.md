@@ -12,13 +12,13 @@ Fable 5.1 | 5h 24%/60% (resets 15:00) | 7d 44%/50% | Fable ~36%
 - after each, dim, the **pace reference**: the elapsed share of the window, i.e. where
   usage would sit if the whole allowance were burned evenly. Usage above it is running
   hot; below it is banked room;
-- an **estimate** of the Fable share of the weekly limit (the third bar `/usage` draws as
-  "Current week (Fable)"). The tilde marks it as a local estimate, not a figure the API
-  reported.
+- the Fable share of the weekly limit (the third bar `/usage` draws as "Current week
+  (Fable)"): the figure the usage service reports, or, with a tilde, a local estimate
+  when it has none.
 
-The rate-limit figures are pushed by the engine (`session.measure`), so nothing is
-polled. A one-minute tick keeps the pace references and reset clock moving between
-turns.
+The figures come from Claude Code's usage service when it has answered recently, and
+otherwise from what the engine hands the session (`session.measure`). A one-minute tick
+keeps the pace references and reset clock moving between turns.
 
 ## Loading
 
@@ -33,8 +33,33 @@ Edits to the folder hot-reload in an interactive session. `claude plugin validat
 `claude plugin test` and `tsc -p` (once the engine has laid `.claude-plugin/types/`)
 check it.
 
+## Usage service
+
+`GET https://api.anthropic.com/api/oauth/usage` (header `anthropic-beta:
+oauth-2025-04-20`) is what `/usage` itself reads. It is internal and undocumented, so it
+can change or vanish without notice. The request is authorised with the session's own
+credential through `$.session.authorize()`; the mod never sees the secret. It answers
+all three gauges, including the real Fable percentage, which the engine hands a session
+nowhere else. Sessions inside an Agent SDK host such as T3 Code are handed a 7-day
+reading but no 5-hour one; the service fills that gap.
+
+- **Once a minute, shared.** Only the one-minute tick asks, never a hook. The sessions
+  share one store entry (`service`): when any session last asked and the last reading it
+  got. A session asks only when the last attempt is a minute old or more, and stamps the
+  attempt before the request goes out, so open sessions, or a request that hangs, do not
+  pile up. Every session draws the same reading.
+- **Five minutes fresh.** A reading is drawn for five minutes after it was taken. While
+  it counts, each of the 5h and 7d gauges takes whichever is newer, the service's reading
+  or the session's own, and a window the session lacks comes from the service. Its Fable
+  figure is drawn without the tilde, 0 included.
+- **Fallback.** No first-party credential (a third-party provider, a gateway, no login),
+  a failed or refused request, an answer it cannot read, or a reading five minutes old
+  leaves the mod drawing exactly what it drew before the service: the session's windows
+  and the Fable estimate below. A field missing from the answer drops only its own gauge.
+
 ## The Fable estimate
 
+The fallback, drawn with a tilde, when the usage service has no fresh Fable figure.
 `rate_limits` carries no per-model buckets, so the Fable bar is reconstructed from the
 local transcripts under `~/.claude/projects`.
 
@@ -89,6 +114,10 @@ factor noisy.
 - 2026-08-11: first reading after deduplicating: 7d 44%, Fable 36%, local ratio 0.327,
   implied share 0.40 (rounding bounds 0.39-0.41). The bars were large enough that
   rounding leaves little slack, so this is the first calibration worth trusting.
+- 2026-11-16: the usage service reported the Fable allowance as 50% of the weekly limit
+  (`allowance_percent_of_weekly`), against the calibrated `fableShare` of 0.40. The
+  default is unchanged; the service's own Fable figure now replaces the estimate whenever
+  it answers.
 
 ## Clock
 
@@ -101,8 +130,9 @@ With `clockUrl` set, the mod also mirrors the gauges on a Ulanzi TC002 desk cloc
 FB ~36%   ██████████░░░░░░░░░░░░  rows 11-15 text, then a 3 px bar (rows 12-14) to the right edge
 ```
 
-The colours and pace marks are the band's; the Fable row has no pace mark, as in the
-terminal, and is blank when there is no estimate.
+The figures, colours and pace marks are the band's; the Fable row has no pace mark, as
+in the terminal. It reads `FB 36%` with no tilde, its bar starting one column after the
+shorter text, when the figure is the service's, and is blank when there is neither.
 
 The screen is the clock's custom app named `usage`, sent as one full-screen bitmap to
 `POST <clockUrl>/api/custom?name=usage`. It takes its turn in the clock's app rotation;
@@ -110,10 +140,10 @@ the mod never switches the clock to it and calls no other endpoint.
 
 To turn it on, set `clockUrl` to the clock's base URL, e.g. `http://192.168.1.58`, in
 `/config` or under `pluginConfigs` in settings. Empty (the default), or anything that is
-not an `http://` or `https://` URL, leaves the mod making no request at all.
+not an `http://` or `https://` URL, leaves the mod making no request to a clock.
 
-A frame is pushed when a session starts, on every `session.measure` and on every
-one-minute tick, with a `duration` of 180 seconds (three ticks), so the screen updates
+A frame is pushed when a session starts, on every `session.measure`, on every
+one-minute tick and when a usage-service reading arrives, with a `duration` of 180 seconds (three ticks), so the screen updates
 only while a session is open.
 
 Once pushes stop the clock keeps showing the last frame: a frame stays lit well past its
@@ -127,10 +157,12 @@ pending for 10 seconds.
 ## Files
 
 - `hooks/register.tsx`: the hooks (`session.start`, `session.measure`,
-  `classic.PostModelSwitch`, `ui.render` on `AbovePrompt`), the scan's cache and the
-  clock push.
+  `classic.PostModelSwitch`, `ui.render` on `AbovePrompt`), the scan's cache, the shared
+  usage-service request and the clock push.
+- `hooks/service.ts`: the usage service's URL and the tolerant parser of its answer.
 - `hooks/clock.ts`: the gauges as a 52x16 clock frame, and its request body.
-- `hooks/usage.ts`: the pure parts: pace, tiers, the weekly window, pricing, and the
-  `find | jq` argument vector.
-- `hooks/usage-line.test.ts`, `hooks/clock.test.ts`: `claude plugin test .`
+- `hooks/usage.ts`: the pure parts: choosing what to draw, pace, tiers, the weekly
+  window, pricing, and the `find | jq` argument vector.
+- `hooks/usage-line.test.ts`, `hooks/service.test.ts`, `hooks/clock.test.ts`:
+  `claude plugin test .`; `hooks/service.sample.ts` is their trimmed real answer.
 - `types/index.d.ts`: the `$.state` contract.
