@@ -1,16 +1,24 @@
-"""Which Claude session is in the frontmost terminal tab.
+"""Which Claude session is in the frontmost terminal tab or T3 Code thread.
 
 Returns the same key the hooks compute for their own session:
-"tty:/dev/ttysNNN" (Ghostty) or "rex:<REX_BLOCK>" (Rex).
+"tty:/dev/ttysNNN" (Ghostty), "rex:<REX_BLOCK>" (Rex) or "t3:<thread id>"
+(T3 Code).
 """
 
 import json
+import re
 import subprocess
 from typing import Callable, Optional
 
 GHOSTTY_BUNDLE = "com.mitchellh.ghostty"
 REX_BUNDLE = "com.superlogical.rex"
 REX_CLI = "/Applications/Rex Beta.app/Contents/Helpers/Rex Server.rex/Contents/MacOS/rex"
+T3_BUNDLE = "com.t3tools.t3code"
+# The T3 Code window's page address while a thread is open:
+# t3code://app/#/<environment id>/<thread id>. Other pages (settings, a new
+# unsent thread) don't match.
+_UUID = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
+_T3_THREAD_URL = re.compile(rf"^t3code://app/#/{_UUID}/({_UUID})(?:[/?].*)?$")
 _GHOSTTY_SCRIPT = (
     'tell application "Ghostty" to get tty of focused terminal of selected tab of front window'
 )
@@ -67,14 +75,27 @@ def _rex_key(window_title: str, run: Callable) -> Optional[str]:
     return None
 
 
+def t3_key(url: Optional[str]) -> Optional[str]:
+    """The session key for the thread a T3 Code page address shows, if any."""
+    match = _T3_THREAD_URL.match(url or "")
+    return "t3:" + match.group(1).lower() if match else None
+
+
 def focused_session_key(
-    front_bundle: str, window_title: str, run: Callable
+    front_bundle: str,
+    window_title: str,
+    run: Callable,
+    t3_url: Optional[Callable[[], Optional[str]]] = None,
 ) -> Optional[str]:
+    """`t3_url` returns the front T3 Code window's page address (the Talon
+    glue reads it through accessibility)."""
     try:
         if front_bundle == GHOSTTY_BUNDLE:
             return _ghostty_key(run)
         if front_bundle == REX_BUNDLE:
             return _rex_key(window_title or "", run)
+        if front_bundle == T3_BUNDLE and t3_url is not None:
+            return t3_key(t3_url())
     except Exception:
         return None
     return None

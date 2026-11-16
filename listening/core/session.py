@@ -12,10 +12,14 @@ def own_session_key(
 ) -> str | None:
     """Identify the terminal tab a process belongs to.
 
-    Rex sessions use REX_BLOCK. Otherwise walk up the process tree and use the
-    topmost real tty (sessions under Claude's background helper have an inner
-    pty below the tab's real tty).
+    T3 Code sessions use T3CODE_THREAD_ID (they have no tty) and Rex sessions
+    use REX_BLOCK. Otherwise walk up the process tree and use the topmost real
+    tty (sessions under Claude's background helper have an inner pty below the
+    tab's real tty).
     """
+    thread = env.get("T3CODE_THREAD_ID")
+    if thread:
+        return "t3:" + thread
     block = env.get("REX_BLOCK")
     if block:
         return "rex:" + block

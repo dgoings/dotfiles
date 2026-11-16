@@ -1,6 +1,6 @@
 import json
 
-from core.focus import focused_session_key
+from core.focus import focused_session_key, t3_key
 
 GHOSTTY = "com.mitchellh.ghostty"
 REX = "com.superlogical.rex"
@@ -111,3 +111,30 @@ def test_garbage_json_returns_none():
 
 def test_unknown_app_none():
     assert focused_session_key("com.apple.Safari", "t", fake({})) is None
+
+
+# --- T3 Code -------------------------------------------------------------------
+
+T3 = "com.t3tools.t3code"
+ENV = "0d222d51-200a-45cc-91a7-a33bd7fdbc9d"
+THREAD = "1aa5ff5d-6693-4fa5-9d3e-61c2205d1681"
+T3_URL = f"t3code://app/#/{ENV}/{THREAD}"  # real page address of an open thread
+
+
+def test_t3_thread_from_page_address():
+    assert focused_session_key(T3, "T3 Code (Beta)", fake({}), lambda: T3_URL) == "t3:" + THREAD
+    assert t3_key(T3_URL + "?panel=diff") == "t3:" + THREAD
+    assert t3_key(T3_URL + "/files") == "t3:" + THREAD
+
+
+def test_t3_pages_that_are_not_a_thread_none():
+    for url in (None, "", "t3code://app/#/", "t3code://app/#/settings", f"t3code://app/#/{ENV}",
+                f"t3code://app/#/{ENV}/draft", f"https://example.com/#/{ENV}/{THREAD}"):
+        assert t3_key(url) is None
+
+
+def test_t3_without_reader_or_failing_reader_none():
+    def boom():
+        raise RuntimeError("no window")
+    assert focused_session_key(T3, "t", fake({})) is None
+    assert focused_session_key(T3, "t", fake({}), boom) is None

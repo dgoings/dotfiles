@@ -20,8 +20,15 @@ from pathlib import Path
 
 from talon import Module, actions, app, cron, scope, settings, ui
 
-from .core.focus import GHOSTTY_BUNDLE, REX_BUNDLE, default_run, focused_session_key
+from .core.focus import (
+    GHOSTTY_BUNDLE,
+    REX_BUNDLE,
+    T3_BUNDLE,
+    default_run,
+    focused_session_key,
+)
 from .core.player import Chime, Deafen, Listen, Player, Speak, StopSpeech
+from .core.composer import SendWatch
 from .core.store import Store
 
 mod = Module()
@@ -68,7 +75,15 @@ CHIMES = {
     "done": "/System/Library/Sounds/Glass.aiff",
     "needs_you": "/System/Library/Sounds/Submarine.aiff",
 }
-CLAUDE_TERMINALS = {GHOSTTY_BUNDLE, REX_BUNDLE}
+# Apps whose Claude sessions listening mode can follow. In the terminals you
+# answer with Claude Code's /voice; in T3 Code with its own dictation.
+CLAUDE_TERMINALS = {GHOSTTY_BUNDLE, REX_BUNDLE, T3_BUNDLE}
+DICTATION_KEYS = {"claude": "space", "t3": "cmd-shift-d"}  # each toggles recording
+# T3 Code auto-send: its dictation puts the text in the message box without
+# sending it, so we watch the box and press Enter once the text has landed
+# (core/composer.py decides when).
+SEND_POLL = "150ms"
+T3_COMPOSER_CLASS = "composer-tiptap"  # marks the message box in T3's page
 NO_MIC = "None"
 
 store = Store()
@@ -81,6 +96,11 @@ _on = False  # Talon is in listening mode
 _responding = False  # Claude's /voice is recording an answer (voice key / "respond")
 _responding_key = None  # session being answered (None: couldn't tell)
 _responding_since = 0.0  # time.time() the response started
+_responding_tool = "claude"  # what records the response: "claude" or "t3"
+_send_job = None  # cron job waiting to send a T3 Code response
+_send_watch = None  # its SendWatch
+_send_seen = None  # last message box length logged, for the Talon log
+_send_draft = None  # T3's message box text when the recording started
 _say = None  # running `say` process
 _say_generation = 0  # generation the running `say` belongs to
 _generation = 0  # bumped whenever we kill speech, so a killed `say` never counts as finished
@@ -99,7 +119,8 @@ class _Focus:
     """The focused session key, looked up at most once per tick or handler.
 
     The lookup can take seconds (osascript / Rex CLI), so it only runs when
-    something actually needs it, and never for apps other than Ghostty/Rex.
+    something actually needs it, and never for apps other than Ghostty, Rex
+    and T3 Code.
     """
 
     def __init__(self):
@@ -122,14 +143,62 @@ def _lookup_focus():
     except Exception as e:
         _log(f"focus lookup failed: {e!r}")
         return None
-    return focused_session_key(bundle, title, default_run)
+    return focused_session_key(bundle, title, default_run, _t3_url)
+
+
+def _t3_url():
+    """The front T3 Code window's page address, which names the open thread.
+
+    The app's own page is the first web area in the window. The walk doesn't
+    go inside web areas (the page itself is huge), and skips any that aren't
+    T3's own, such as a browser preview.
+    """
+    queue = [ui.active_window().element]
+    for _ in range(300):
+        if not queue:
+            break
+        element = queue.pop(0)
+        try:
+            if element.get("AXRole") == "AXWebArea":
+                url = str(element.get("AXURL") or "")
+                if url.startswith("t3code://"):
+                    return url
+                continue
+            queue.extend(element.children)
+        except Exception:
+            continue  # the element went away mid-walk
+    return None
 
 
 def _in_claude_terminal() -> bool:
+    """The front app is one listening mode follows (a terminal or T3 Code)."""
     try:
         return ui.active_app().bundle in CLAUDE_TERMINALS
     except Exception:
         return False
+
+
+def _dictation_tool() -> str:
+    try:
+        return "t3" if ui.active_app().bundle == T3_BUNDLE else "claude"
+    except Exception:
+        return "claude"
+
+
+def _t3_composer_text():
+    """What's typed in T3 Code's message box, or None if T3 isn't in front or
+    the keyboard focus isn't in the box."""
+    try:
+        if ui.active_app().bundle != T3_BUNDLE:
+            return None
+        element = ui.focused_element()
+        if element.get("AXRole") != "AXTextArea":
+            return None
+        if T3_COMPOSER_CLASS not in (element.get("AXDOMClassList") or []):
+            return None
+        return str(element.get("AXValue") or "")
+    except Exception:
+        return None
 
 
 # --- effects ---------------------------------------------------------------
@@ -413,12 +482,14 @@ def _listening_off() -> None:
     was_responding = _responding
     _on = False
     _responding = False
+    _cancel_send()
     if was_responding:
         try:
-            # Stops Claude's /voice recording (it sends what was dictated).
-            actions.user.ulanzi_key("space")
+            # Stops the recording. Claude's /voice sends what was dictated;
+            # T3 Code puts it in the message box and leaves it unsent.
+            _press_dictation(_responding_tool)
         except Exception as e:
-            _log(f"stopping /voice failed: {e!r}")
+            _log(f"stopping dictation failed: {e!r}")
     _run([StopSpeech()])
     for step in (_restore_mic, _leave_listening_modes, lambda: store.set_on(False)):
         try:
@@ -449,20 +520,79 @@ def _prompt_sent(event: dict) -> None:
 # --- control helpers ---------------------------------------------------------
 
 
+def _press_dictation(tool: str) -> None:
+    actions.user.ulanzi_key(DICTATION_KEYS[tool])
+
+
 def _start_respond(focused_key) -> None:
-    global _responding, _responding_key, _responding_since
+    global _responding, _responding_key, _responding_since, _responding_tool
+    global _send_draft
+    _cancel_send()  # a new answer replaces one still waiting to be sent
     _responding = True
+    _responding_tool = _dictation_tool()
+    _send_draft = _t3_composer_text() if _responding_tool == "t3" else None
     _responding_key = focused_key or player.key
     _responding_since = time.time()
     _run(player.respond_started(focused_key))
-    actions.user.ulanzi_key("space")  # Claude Code's /voice tap
+    _press_dictation(_responding_tool)
 
 
 def _finish_respond(focused_key) -> None:
     global _responding
     _responding = False
-    actions.user.ulanzi_key("space")  # stops /voice tap and sends
+    if _responding_tool == "t3":
+        _send_when_landed()  # reads the message box before the recording stops
+    _press_dictation(_responding_tool)  # /voice tap stops and sends
     _run(player.respond_finished(focused_key))
+
+
+def _send_when_landed() -> None:
+    """Send the T3 Code response once the dictated text is in the message box."""
+    global _send_job, _send_watch, _send_seen
+    _cancel_send()
+    at_stop = _t3_composer_text()
+    if at_stop is None:
+        # While T3 records, the keyboard focus leaves the message box, so it
+        # can't be read. Compare with what was there before the recording.
+        at_stop = _send_draft
+    _send_seen = None if at_stop is None else len(at_stop.strip())
+    _log(f"T3 response: recording stopped, message box has {_send_seen} characters")
+    _send_watch = SendWatch(at_stop, time.time())
+    _send_job = cron.interval(SEND_POLL, _send_poll)
+
+
+def _cancel_send() -> None:
+    global _send_job, _send_watch
+    job, _send_job, _send_watch = _send_job, None, None
+    if job is not None:
+        cron.cancel(job)
+
+
+def _send_poll() -> None:
+    global _send_seen
+    try:
+        with _lock:
+            if _send_watch is None:
+                return
+            text = _t3_composer_text()
+            seen = None if text is None else len(text.strip())
+            if seen != _send_seen:  # a trail in the Talon log, for tuning
+                _send_seen = seen
+                _log(f"T3 response: message box now has {seen} characters")
+            verdict = _send_watch.poll(text, time.time())
+            if verdict == "wait":
+                return
+            _cancel_send()
+            if verdict == "send":
+                # The text was just read from T3's message box, so T3 is in
+                # front with the box focused: Enter sends it.
+                _log("T3 response: sending")
+                actions.key("enter")
+            else:
+                _log("T3 response: no dictated text showed up; left unsent")
+    except Exception as e:
+        _log(f"send poll failed: {e!r}")
+        _cancel_send()
 
 
 def _intercept(control: str, claimed: list) -> bool:
@@ -474,7 +604,7 @@ def _intercept(control: str, claimed: list) -> bool:
         return True
     if control == "voice":
         if not _in_claude_terminal():
-            return False  # Superwhisper behaves as before
+            return False  # elsewhere, Superwhisper behaves as before
         claimed[0] = True
         focused = _Focus()
         if _responding:
@@ -629,7 +759,9 @@ class Actions:
         """Start dictating an answer to Claude; the voice key stops and sends"""
         with _lock:
             if not _in_claude_terminal():
-                app.notify("Listening mode", "Respond works in a Claude terminal tab")
+                app.notify(
+                    "Listening mode", "Respond works in a Claude terminal tab or T3 Code"
+                )
                 return
             if _responding:
                 return

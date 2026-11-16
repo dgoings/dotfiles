@@ -5,6 +5,7 @@ subprocess, focus lookup and every talon action are fakes that only record.
 """
 
 import importlib.util
+import json
 import sys
 import time
 import types
@@ -51,6 +52,7 @@ def fake_talon(log):
     talon.Module = Module
     talon.actions = types.SimpleNamespace(
         user=types.SimpleNamespace(ulanzi_key=lambda keys: log.append(("key", keys))),
+        key=lambda keys: log.append(("sent", keys)),
         sound=types.SimpleNamespace(
             active_microphone=lambda: log.mic,
             set_microphone=lambda name: (log.append(("mic", name)), setattr(log, "mic", name)),
@@ -60,8 +62,14 @@ def fake_talon(log):
             disable=lambda m: log.append(("disable", m)),
         ),
     )
-    talon.app = types.SimpleNamespace(register=lambda *a: None, notify=lambda *a: None)
-    talon.cron = types.SimpleNamespace(interval=lambda *a: None)
+    talon.app = types.SimpleNamespace(
+        register=lambda *a: None, notify=lambda *a: log.append(("notify", a[-1]))
+    )
+    talon.cron = types.SimpleNamespace(
+        interval=lambda spec, fn: (log.append(("interval", fn)), fn)[1],
+        after=lambda spec, fn: log.append(("after", fn)),
+        cancel=lambda job: log.append(("cancel", job)),
+    )
     talon.scope = types.SimpleNamespace(get=lambda name: set())
     talon.settings = types.SimpleNamespace(get=lambda name: settings_values[name])
     talon.ui = types.SimpleNamespace()
@@ -70,6 +78,9 @@ def fake_talon(log):
 
 class Log(list):
     mic = MIC
+
+    def of(self, kind):
+        return [v for k, v in self if k == kind]
 
     def keys(self):
         return [v for k, v in self if k == "key"]
@@ -220,3 +231,131 @@ def test_speak_failure_finishes_section_and_restores_mic(glue, store, monkeypatc
     glue._tick()
     assert glue.player.phase == "waiting"
     assert glue.log.mic == MIC
+
+
+# --- T3 Code: answer with its own dictation, then send once the text lands --------
+
+T3_KEY = "t3:1aa5ff5d-6693-4fa5-9d3e-61c2205d1681"
+DICTATE = "cmd-shift-d"
+
+
+class Clock:
+    now = 1000.0
+
+    def time(self):
+        return self.now
+
+
+@pytest.fixture
+def t3(glue, monkeypatch):
+    """The glue with T3 Code in front, an empty message box and a fake clock."""
+    front = types.SimpleNamespace(bundle=glue.T3_BUNDLE)
+    box = types.SimpleNamespace(text="\n")
+    clock = Clock()
+    monkeypatch.setattr(glue.ui, "active_app", lambda: front, raising=False)
+    monkeypatch.setattr(glue, "_lookup_focus", lambda: T3_KEY)
+    monkeypatch.setattr(glue, "_t3_composer_text", lambda: box.text)
+    monkeypatch.setattr(glue, "time", clock)
+    glue.front, glue.box, glue.clock = front, box, clock
+    return glue
+
+
+def poll(glue, seconds):
+    glue.clock.now += seconds
+    glue._send_poll()
+
+
+def test_t3_respond_records_with_t3_dictation_not_space(t3):
+    assert t3.Actions.listening_intercept("voice") is True
+    assert t3._responding and t3.log.keys() == [DICTATE]
+    assert t3.log.mic == "None"
+    assert t3.store.session(T3_KEY).awaiting_response is True
+
+
+def test_t3_second_press_stops_and_sends_once_text_lands(t3):
+    t3.Actions.listening_intercept("voice")
+    t3.Actions.listening_intercept("voice")
+    assert t3.log.keys() == [DICTATE, DICTATE]
+    assert t3._responding is False and t3.log.mic == MIC  # Talon hears again
+    poll(t3, 2.0)
+    assert t3.log.of("sent") == []  # still transcribing: nothing sent
+    t3.box.text = "sounds good\n"
+    poll(t3, 0.15)
+    assert t3.log.of("sent") == []  # just landed: give it a moment to settle
+    poll(t3, 0.8)
+    assert t3.log.of("sent") == ["enter"]
+    assert t3._send_job is None
+    poll(t3, 0.15)  # a late poll does nothing
+    assert t3.log.of("sent") == ["enter"]
+
+
+def test_t3_text_that_keeps_changing_is_not_sent_until_it_settles(t3):
+    t3.Actions.listening_intercept("voice")
+    t3.Actions.listening_intercept("voice")
+    t3.box.text = "sounds good"
+    poll(t3, 0.15)
+    t3.box.text = "Sounds good."  # tidied up after the raw text
+    poll(t3, 0.6)
+    poll(t3, 0.5)
+    assert t3.log.of("sent") == []
+    poll(t3, 0.3)
+    assert t3.log.of("sent") == ["enter"]
+
+
+def test_t3_draft_already_in_the_box_is_not_sent_by_itself(t3):
+    t3.box.text = "half a thought"
+    t3.Actions.listening_intercept("voice")
+    t3.Actions.listening_intercept("voice")
+    poll(t3, 5.0)
+    assert t3.log.of("sent") == []
+    t3.box.text = "half a thought and the rest"
+    poll(t3, 0.15)
+    poll(t3, 0.8)
+    assert t3.log.of("sent") == ["enter"]
+
+
+def test_t3_nothing_said_gives_up_without_sending(t3):
+    t3.Actions.listening_intercept("voice")
+    t3.Actions.listening_intercept("voice")
+    poll(t3, 31.0)
+    assert t3.log.of("sent") == [] and t3._send_job is None
+
+
+def test_t3_not_sent_while_the_message_box_cant_be_read(t3):
+    t3.Actions.listening_intercept("voice")
+    t3.Actions.listening_intercept("voice")
+    t3.box.text = None  # another app in front, or focus elsewhere in T3
+    poll(t3, 0.15)
+    poll(t3, 2.0)
+    assert t3.log.of("sent") == [] and t3._send_job is not None
+
+
+def test_t3_listening_off_mid_respond_stops_dictation_unsent(t3):
+    t3.Actions.listening_respond()
+    t3.Actions.listening_off()
+    assert t3.log.keys() == [DICTATE, DICTATE]
+    assert t3._send_job is None and t3.log.of("sent") == []
+    assert t3._responding is False and t3.log.mic == MIC
+
+
+def test_terminal_respond_after_t3_uses_space_again(t3):
+    t3.Actions.listening_intercept("voice")
+    t3.Actions.listening_intercept("voice")
+    t3.front.bundle = "com.mitchellh.ghostty"
+    t3.Actions.listening_intercept("voice")
+    assert t3.log.keys() == [DICTATE, DICTATE, "space"] and t3._send_job is None
+
+
+def test_t3_draft_is_safe_when_the_box_cant_be_read_while_recording(t3):
+    t3.box.text = "half a thought"
+    t3.Actions.listening_intercept("voice")
+    t3.box.text = None  # T3 moves the focus out of the box while it records
+    t3.Actions.listening_intercept("voice")
+    t3.box.text = "half a thought"
+    poll(t3, 0.15)
+    poll(t3, 5.0)
+    assert t3.log.of("sent") == []
+    t3.box.text = "half a thought and the rest"
+    poll(t3, 0.15)
+    poll(t3, 0.8)
+    assert t3.log.of("sent") == ["enter"]

@@ -38,3 +38,9 @@ def test_parent_failure_keeps_found():
 
     assert own_session_key({}, lambda p: "ttys007", parent, 50) == "tty:/dev/ttys007"
     assert own_session_key({}, lambda p: "ttys007", lambda p: 0, 50) == "tty:/dev/ttys007"
+
+
+def test_t3_thread_env_wins_over_rex_and_tty():
+    t, p = _chain({50: "ttys003"}, {50: 1})
+    env = {"T3CODE_THREAD_ID": "dd7c8f3b-1577-4a1a-ad89-fcb1f0faa080", "REX_BLOCK": "block:9"}
+    assert own_session_key(env, t, p, 50) == "t3:dd7c8f3b-1577-4a1a-ad89-fcb1f0faa080"

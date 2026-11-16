@@ -15,7 +15,7 @@ PERMISSION = {"notification_type": "permission_prompt", "message": "Claude needs
 def run(store, *args, stdin="", env_extra=None):
     import os
 
-    env = {k: v for k, v in os.environ.items() if k not in ("REX_BLOCK", "LISTENING_NESTED")}
+    env = {k: v for k, v in os.environ.items() if k not in ("REX_BLOCK", "T3CODE_THREAD_ID", "LISTENING_NESTED")}
     env["LISTENING_STATE_DIR"] = str(store.root)
     env["REX_BLOCK"] = "block:t"
     env.update(env_extra or {})
@@ -313,7 +313,8 @@ def test_missing_core_exits_0_silently(store, tmp_path):
     copy = lonely / "listen.py"
     copy.write_text(SCRIPT.read_text())
     store.set_on(True)
-    env = {k: v for k, v in __import__("os").environ.items() if k != "LISTENING_NESTED"}
+    env = {k: v for k, v in __import__("os").environ.items()
+           if k not in ("T3CODE_THREAD_ID", "LISTENING_NESTED")}
     env["LISTENING_STATE_DIR"] = str(store.root)
     for sub in ("hook-prompt", "hook-stop", "hook-notify"):
         r = subprocess.run([str(PY), str(copy), sub], input="{}", capture_output=True,

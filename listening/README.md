@@ -1,6 +1,6 @@
 # Listening mode
 
-Claude Code replies are rewritten for the ear and spoken through Talon, so you can listen away from the screen. Design: `docs/2026-11-10-listening-mode-design.md`. Style guide for the spoken text: `listening/style_guide.md`.
+Claude Code replies are rewritten for the ear and spoken through Talon, so you can listen away from the screen. It follows Claude sessions in Ghostty, Rex and T3 Code. Design: `docs/2026-11-10-listening-mode-design.md`. Style guide for the spoken text: `listening/style_guide.md`.
 
 ## Turn it on and off
 
@@ -30,14 +30,22 @@ Only these are heard between spoken sections, and each must be said alone:
 | repeat | this section again |
 | respond | start dictating to Claude |
 | stop | stop playback; the rest is kept |
-| tab next / tab last | switch terminal tabs |
+| tab next / tab last | switch terminal tabs (T3 Code: threads) |
 | listening off | leave listening mode |
 
 Saying "respond" starts dictation. End it with the voice-key shortcut, so Talon un-mutes. With Claude Code's `/voice tap`, that second press also sends. Sending from the keyboard instead (Enter) also un-mutes Talon, once the prompt is submitted. "listening off" (or the Talon key) mid-dictation stops the recording, which sends what was dictated.
 
+## T3 Code
+
+Claude threads in T3 Code work like terminal tabs: the thread that's open is the session in front, and its replies are the ones "go ahead" plays. Threads run by other providers (Codex) aren't spoken, since the hooks are Claude Code's.
+
+Dictation there is T3 Code's own (its `composer.dictation` shortcut, cmd+shift+D, in tap-to-start, tap-to-stop mode), not `/voice`. "respond" or the voice key starts it; the voice key again stops it. T3 puts the text in the message box without sending it, so listening mode watches the box and presses Enter once new text has been there, unchanged, for 0.7 seconds (`SETTLE` in `core/composer.py`). It only sends while T3 Code is in front with the message box focused. If no new text shows up within 30 seconds, nothing is sent: press the knob or Enter. Each step is written to the Talon log as "T3 response: ...". "listening off" mid-dictation stops the recording and leaves the text unsent.
+
+Outside listening mode the voice key also uses T3's dictation there (Talon sleeps meanwhile), and you send with the knob or Enter as before. The key asks T3 whether it is recording (the "Start voice input" / "Finish voice input" button by the message box), so it stays in step even if a recording was started or ended some other way.
+
 ## Ulanzi AU05 as a remote
 
-The knob (turn and press) and key 3 act as a remote only while the focused session has something to hear (playing, paused, or an unheard reply or walkthrough waiting) and isn't blocked; otherwise they keep their normal per-app meanings. While listening mode is on, the Talon key always leaves listening mode, and the voice key always starts or ends a response in a Claude terminal (Ghostty or Rex).
+The knob (turn and press) and key 3 act as a remote only while the focused session has something to hear (playing, paused, or an unheard reply or walkthrough waiting) and isn't blocked; otherwise they keep their normal per-app meanings. While listening mode is on, the Talon key always leaves listening mode, and the voice key always starts or ends a response in a Claude terminal (Ghostty or Rex) or T3 Code.
 
 | Control | Does | Shortcut |
 |---|---|---|
