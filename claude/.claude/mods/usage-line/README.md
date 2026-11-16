@@ -45,7 +45,8 @@ reading but no 5-hour one; the service fills that gap.
 
 - **Once a minute, shared.** Only the one-minute tick asks, never a hook. The sessions
   share one store entry (`service`): when any session last asked and the last reading it
-  got. A session asks only when the last attempt is a minute old or more, and stamps the
+  got. A session asks only when the last attempt is 50 seconds old or more (just under a
+  tick, so the next tick is never a moment short), and stamps the
   attempt before the request goes out, so open sessions, or a request that hangs, do not
   pile up. Every session draws the same reading.
 - **Five minutes fresh.** A reading is drawn for five minutes after it was taken. While

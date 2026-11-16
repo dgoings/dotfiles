@@ -345,7 +345,7 @@ describe('the usage service', () => {
     expect(serviceRequests[0]?.init?.headers?.['anthropic-beta']).toBe('oauth-2025-04-20')
   })
 
-  test('asks at most once a minute', async ($, on) => {
+  test('asks once per tick, not once per measurement', async ($, on) => {
     const { clock, world, serviceRequests } = stubWorld(on)
     world.auth = AUTH
     await start($)
@@ -355,9 +355,11 @@ describe('the usage service', () => {
     await $.session.measure({ context: { window: 1_000_000 }, rateLimits: LIMITS, changed: ['rateLimits'] })
     expect(serviceRequests.length).toBe(1)
     await clock.advance(29_000) // the 60 s tick, 59 s after the first request
-    expect(serviceRequests.length).toBe(1)
-    await clock.advance(60_000) // the next tick, 119 s after it
     expect(serviceRequests.length).toBe(2)
+    await $.session.measure({ context: { window: 1_000_000 }, rateLimits: LIMITS, changed: ['rateLimits'] })
+    expect(serviceRequests.length).toBe(2)
+    await clock.advance(60_000) // the next tick
+    expect(serviceRequests.length).toBe(3)
   })
 
   test('draws what another session fetched in the last minute, without asking again', async ($, on) => {
@@ -407,7 +409,7 @@ describe('the usage service', () => {
     await clock.advance(1_000)
     expect(serviceRequests.length).toBe(1)
     await $.session.measure({ context: { window: 1_000_000 }, rateLimits: LIMITS, changed: ['rateLimits'] })
-    await clock.advance(59_000)
+    await clock.advance(40_000)
     expect(serviceRequests.length).toBe(1)
     expect(await band($)).toMatch(TODAY)
   })

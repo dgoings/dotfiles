@@ -15,8 +15,10 @@ const SCAN_TIMEOUT_MS = 60_000
 const FRAME_SEC = 180
 // A push still pending after this long is abandoned, so a dead clock cannot block the next.
 const PUSH_STALE_MS = 10_000
-// However many sessions are open, the usage service is asked at most this often.
-const SERVICE_TTL_MS = 60_000
+// However many sessions are open, the usage service is asked at most this often. Under the
+// one-minute tick on purpose: an attempt is stamped a moment after its tick, so a full minute
+// here would make the next tick fall just short and halve the rate.
+const SERVICE_TTL_MS = 50_000
 
 type ScanCache = { at: number; windowStart: number; spend: Spend }
 // Shared between sessions: when one last asked the service, and the last reading it got.
