@@ -26,10 +26,25 @@ SUPERWHISPER_PROCESS = "superwhisper"
 # (e.g. Up turning into cmd+Up, or scrolling turning into ctrl+scroll zoom).
 RELEASE_DELAY = "80ms"
 
+# T3 Code has its own dictation (its composer.dictation shortcut; tap to start,
+# tap to stop). It puts the text in the message box without sending it.
+T3_BUNDLE = "com.t3tools.t3code"
+T3_DICTATION_KEY = "cmd-shift-d"
+# T3 shows one of these buttons by the message box, which says whether it is
+# recording (the Finish label can end with the shortcut, e.g. " (⇧⌘D)").
+T3_IDLE_BUTTON = "Start voice input"
+T3_RECORDING_BUTTON = "Finish voice input"
+T3_MAX_NODES = 3000
+
 # Each dictation tool has its own on/off state, and the voice key always
 # toggles the tool for the frontmost app: in Rex/Ghostty that's Claude Code's
-# /voice, even if Superwhisper is running or mid-recording.
-DICTATION_KEYS = {"claude": "space", "superwhisper": SUPERWHISPER_HOTKEY}
+# /voice and in T3 Code its own dictation, even if Superwhisper is running or
+# mid-recording.
+DICTATION_KEYS = {
+    "claude": "space",
+    "t3": T3_DICTATION_KEY,
+    "superwhisper": SUPERWHISPER_HOTKEY,
+}
 _dictating = set()  # tools currently recording
 _talon_was_awake = False  # Talon's state before the first tool started
 
@@ -43,6 +58,30 @@ def _superwhisper_running() -> bool:
     # list, so check for the process instead.
     result = subprocess.run(["pgrep", "-x", SUPERWHISPER_PROCESS], capture_output=True)
     return result.returncode == 0
+
+
+def _t3_recording():
+    """True if T3 Code is recording, False if it's idle, None if it won't say
+    (no message box on screen, or it's still turning speech into text)."""
+    try:
+        queue = [ui.active_window().element]
+        for _ in range(T3_MAX_NODES):
+            if not queue:
+                break
+            el = queue.pop(0)
+            try:
+                if el.get("AXRole") == "AXButton":
+                    label = el.get("AXDescription") or el.get("AXTitle") or ""
+                    if label.startswith(T3_RECORDING_BUTTON):
+                        return True
+                    if label == T3_IDLE_BUTTON:
+                        return False
+                queue.extend(el.children)
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"ulanzi: couldn't read T3's voice button: {e!r}")
+    return None
 
 
 def _listening_takes(name: str) -> bool:
@@ -123,17 +162,35 @@ class Actions:
         actions.user.ulanzi_key("enter")
 
     def ulanzi_dictation_toggle():
-        """Start/stop dictation: Claude Code /voice in terminals, Superwhisper elsewhere.
+        """Start/stop dictation: Claude Code /voice in terminals, T3 Code's own, Superwhisper elsewhere.
 
         Talon sleeps while you dictate so it doesn't act on your speech, then
         returns to whatever state it was in before.
         """
         global _talon_was_awake
-        if ui.active_app().bundle in CLAUDE_CODE_TERMINALS:
+        bundle = ui.active_app().bundle
+        if bundle in CLAUDE_CODE_TERMINALS:
             tool = "claude"
+        elif bundle == T3_BUNDLE:
+            tool = "t3"
         else:
             tool = "superwhisper"
         sw_running = tool != "superwhisper" or _superwhisper_running()
+
+        # T3 can start or stop recording without this key (its own button,
+        # Escape, listening mode), so ask it rather than trust our memory.
+        if tool == "t3":
+            recording = _t3_recording()
+            if recording is True and tool not in _dictating:
+                if not _dictating:
+                    _talon_was_awake = actions.speech.enabled()
+                _dictating.add(tool)
+            elif recording is False and tool in _dictating:
+                # The recording ended some other way: finish that round
+                # (waking Talon if it was awake before) and start a new one.
+                _dictating.discard(tool)
+                if not _dictating and _talon_was_awake:
+                    actions.speech.enable()
 
         if tool in _dictating:
             _dictating.discard(tool)
