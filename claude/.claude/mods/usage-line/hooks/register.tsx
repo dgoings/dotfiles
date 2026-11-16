@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Snapshot, Spend } from '../types'
+import { clockBody, renderClock, type ClockFigures } from './clock'
 import { FIVE_HOURS_MS, SEVEN_DAYS_MS, clock, fablePercent, meter, modelName, pace, priceRows, scanCommand, tier, weekWindowStart } from './usage'
 
 const snapshot = atom({ plugin: 'usage-line', key: 'snapshot' } as const, null as Snapshot | null)
@@ -9,6 +10,10 @@ const snapshot = atom({ plugin: 'usage-line', key: 'snapshot' } as const, null a
 const TICK_MS = 60_000
 const SCAN_TTL_MS = 120_000
 const SCAN_TIMEOUT_MS = 60_000
+// Three ticks, so a frame does not lapse between pushes while a session is open.
+const FRAME_SEC = 180
+// A push still pending after this long is abandoned, so a dead clock cannot block the next.
+const PUSH_STALE_MS = 10_000
 
 type ScanCache = { at: number; windowStart: number; spend: Spend }
 
@@ -37,20 +42,65 @@ const scan = async ($: EngineInterface) => {
   }
 }
 
+/** The gauges as the band draws them, for the clock. */
+const clockFigures = (s: Snapshot, fableShare: number): ClockFigures => {
+  const five = s.rateLimits.find(w => w.kind === 'five_hour')
+  const week = s.rateLimits.find(w => w.kind === 'seven_day')
+  return {
+    five: five ? { percent: Math.round(five.percentUsed), pace: pace(FIVE_HOURS_MS, five.resetsAt, s.now) } : null,
+    week: week ? { percent: Math.round(week.percentUsed), pace: pace(SEVEN_DAYS_MS, week.resetsAt, s.now) } : null,
+    fable: (week && fablePercent(week.percentUsed, s.spend, fableShare)) || null,
+  }
+}
+
+// Where frames go, and when the push in flight started (by $.clock.now()), null when none is pending.
+type ClockTarget = { url: string; fableShare: number; pushStartedAt: number | null }
+
+// Sends the current figures to the clock without waiting for it to answer.
+const push = async ($: EngineInterface, target: ClockTarget | null) => {
+  if (target === null) return
+  try {
+    const s = await read($, snapshot)
+    const now = await $.clock.now()
+    if (s === null || (target.pushStartedAt !== null && now - target.pushStartedAt < PUSH_STALE_MS)) return
+    target.pushStartedAt = now
+    const body = clockBody(renderClock(clockFigures(s, target.fableShare)), FRAME_SEC)
+    void $.http
+      .fetch(target.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+      .catch(() => {})
+      .finally(() => {
+        if (target.pushStartedAt === now) target.pushStartedAt = null
+      })
+  } catch {
+    // The clock is a mirror; nothing it does may break a hook.
+  }
+}
+
+const refresh = async ($: EngineInterface, target: ClockTarget | null) => {
+  await scan($)
+  await push($, target)
+}
+
 export const register: Register = (on, options) => {
   const configured = Number(options.fableShare)
   const fableShare = Number.isFinite(configured) && configured > 0 ? configured : 0.4
+  const clockUrl = String(options.clockUrl ?? '')
+  const target: ClockTarget | null = /^https?:\/\//.test(clockUrl)
+    ? { url: `${clockUrl.replace(/\/+$/, '')}/api/custom?name=usage`, fableShare, pushStartedAt: null }
+    : null
 
   on('session.start', async ($, e, next) => {
     const [model, usage, now] = await Promise.all([$.session.model(), $.session.usage(), $.clock.now()])
     await patch($, { model: modelName(model), rateLimits: usage.rateLimits, now })
-    $.clock.after(1_000, () => void scan($))
-    $.clock.every(TICK_MS, () => void scan($))
+    await push($, target)
+    $.clock.after(1_000, () => void refresh($, target))
+    $.clock.every(TICK_MS, () => void refresh($, target))
     return next(e)
   })
 
   on('session.measure', async ($, e, next) => {
     await patch($, { rateLimits: e.rateLimits, now: await $.clock.now() })
+    await push($, target)
     return next(e)
   })
 

@@ -90,11 +90,43 @@ factor noisy.
   implied share 0.40 (rounding bounds 0.39-0.41). The bars were large enough that
   rounding leaves little slack, so this is the first calibration worth trusting.
 
+## Clock
+
+With `clockUrl` set, the mod also mirrors the gauges on a Ulanzi TC002 desk clock
+(52x16 pixels, stock firmware):
+
+```
+5H 24%            7D 44%          rows 0-4   label grey, percentage in tier colour
+██████┆░░░░░░░░   ███████████┆░░  rows 6-8   two bars, 25 px each, at x=0 and x=27
+FB ~36%   ██████████░░░░░░░░░░░░  rows 11-15 text, then a 3 px bar (rows 12-14) to the right edge
+```
+
+The colours and pace marks are the band's; the Fable row has no pace mark, as in the
+terminal, and is blank when there is no estimate.
+
+The screen is the clock's custom app named `usage`, sent as one full-screen bitmap to
+`POST <clockUrl>/api/custom?name=usage`. It takes its turn in the clock's app rotation;
+the mod never switches the clock to it and calls no other endpoint.
+
+To turn it on, set `clockUrl` to the clock's base URL, e.g. `http://192.168.1.58`, in
+`/config` or under `pluginConfigs` in settings. Empty (the default), or anything that is
+not an `http://` or `https://` URL, leaves the mod making no request at all.
+
+A frame is pushed when a session starts, on every `session.measure` and on every
+one-minute tick, with a `duration` of 180 seconds (three ticks), so the screen updates
+only while a session is open.
+
+An unreachable clock is ignored: a push is never awaited by a hook, every failure is
+swallowed, and while one push is still pending the next is skipped, until it has been
+pending for 10 seconds.
+
 ## Files
 
 - `hooks/register.tsx`: the hooks (`session.start`, `session.measure`,
-  `classic.PostModelSwitch`, `ui.render` on `AbovePrompt`) and the scan's cache.
+  `classic.PostModelSwitch`, `ui.render` on `AbovePrompt`), the scan's cache and the
+  clock push.
+- `hooks/clock.ts`: the gauges as a 52x16 clock frame, and its request body.
 - `hooks/usage.ts`: the pure parts: pace, tiers, the weekly window, pricing, and the
   `find | jq` argument vector.
-- `hooks/usage-line.test.ts`: `claude plugin test .`
+- `hooks/usage-line.test.ts`, `hooks/clock.test.ts`: `claude plugin test .`
 - `types/index.d.ts`: the `$.state` contract.

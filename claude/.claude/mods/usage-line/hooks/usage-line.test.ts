@@ -1,6 +1,8 @@
 import type { On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 
+import { renderClock } from './clock'
 import { fablePercent, meter, modelName, pace, priceRows, weekWindowStart } from './usage'
 
 const HOUR = 3_600_000
@@ -135,26 +137,36 @@ describe('weekWindowStart', () => {
   })
 })
 
-describe('the band', () => {
-  const stubWorld = (on: On) => {
-    const clock = mock.clock(on, { now: NOW })
-    mock.store(on)
-    mock.env(on, { HOME: '/home/t' })
-    const runs: string[][] = []
-    const world = { model: 'claude-fable-5-1' }
-    on('session.start', (_$, e) => ({ cwd: e.cwd }))
-    on('session.measure', (_$, e) => ({ changed: e.changed }))
-    on('classic.PostModelSwitch', () => ({}))
-    on('ui.render', () => ({ type: 'Box', props: {}, children: [] }))
-    on('session.model', () => ({ value: world.model }))
-    on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 1_000_000 }, rateLimits: LIMITS } }))
-    on('process.run', (_$, e) => {
-      runs.push([...e.argv])
-      return { value: { exitCode: 0, stdout: SCAN, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    })
-    return { clock, runs, world }
+const stubWorld = (on: On) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.store(on)
+  mock.env(on, { HOME: '/home/t' })
+  const runs: string[][] = []
+  const world = { model: 'claude-fable-5-1' }
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  on('classic.PostModelSwitch', () => ({}))
+  on('ui.render', () => ({ type: 'Box', props: {}, children: [] }))
+  on('session.model', () => ({ value: world.model }))
+  on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 1_000_000 }, rateLimits: LIMITS } }))
+  on('process.run', (_$, e) => {
+    runs.push([...e.argv])
+    return { value: { exitCode: 0, stdout: SCAN, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  // Every request to the clock, and what the stub answers it with.
+  const requests: { url: string; init?: { method?: string; headers?: Record<string, string>; body?: unknown } }[] = []
+  let answer: () => unknown = () => ({ value: { status: 200, ok: true, headers: {}, text: '{"code":200}' } })
+  on('http.fetch', (_$, e) => {
+    requests.push(e)
+    return answer() as never
+  })
+  const setAnswer = (next: () => unknown) => {
+    answer = next
   }
+  return { clock, runs, world, requests, setAnswer }
+}
 
+describe('the band', () => {
   test('draws the model, each window with its pace and reset, and the Fable estimate', async ($, on) => {
     const { clock, runs } = stubWorld(on)
     await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
@@ -231,5 +243,76 @@ describe('the band', () => {
     await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
     const survey = await $.ui.mount({ plugin: 'usage-line', surface: 'terminal', component: 'AbovePrompt', props: { ...BAND, hasSurvey: true } })
     expect(await survey.find({ key: 'usage' })).toBe(undefined)
+  })
+})
+
+describe('the clock', () => {
+  const CLOCK = { options: { clockUrl: 'http://clock.test/' } }
+  const start = ($: Parameters<TestBody>[0]) => $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+
+  test('posts the gauges to the clock as one bitmap frame', CLOCK, async ($, on) => {
+    const { clock, requests } = stubWorld(on)
+    await start($)
+    await clock.advance(1_000)
+    const last = requests[requests.length - 1]
+    expect(last?.url).toBe('http://clock.test/api/custom?name=usage')
+    expect(last?.init?.method).toBe('POST')
+    expect(last?.init?.headers?.['Content-Type']).toBe('application/json')
+    const body = JSON.parse(String(last?.init?.body))
+    expect(body.duration).toBe(180)
+    // The same figures the band test reads: 5h 24% with pace 60, 7d 44% with pace 50.
+    const fable = Math.round((44 * (FABLE_USD / (FABLE_USD + OPUS_USD))) / 0.4)
+    expect(body.draw[0].db[4]).toEqual(
+      renderClock({ five: { percent: 24, pace: 60 }, week: { percent: 44, pace: 50 }, fable }),
+    )
+    expect(requests.every(r => r.url.includes('/api/custom?name=usage'))).toBe(true)
+  })
+
+  test('pushes again on a measurement and on the tick', CLOCK, async ($, on) => {
+    const { clock, requests } = stubWorld(on)
+    await start($)
+    await clock.advance(1_000)
+    const before = requests.length
+    await $.session.measure({ context: { window: 1_000_000 }, rateLimits: [{ ...FIVE, percentUsed: 81 }, WEEK], changed: ['rateLimits'] })
+    expect(requests.length).toBe(before + 1)
+    await clock.advance(60_000)
+    expect(requests.length).toBe(before + 2)
+  })
+
+  test('makes no request without a clock URL', async ($, on) => {
+    const { clock, requests } = stubWorld(on)
+    await start($)
+    await clock.advance(61_000)
+    expect(requests.length).toBe(0)
+  })
+
+  test('ignores a clock URL that is not http', { options: { clockUrl: 'clock.local' } }, async ($, on) => {
+    const { clock, requests } = stubWorld(on)
+    await start($)
+    await clock.advance(61_000)
+    expect(requests.length).toBe(0)
+  })
+
+  test('carries on when the clock refuses or errors', CLOCK, async ($, on) => {
+    const { clock, setAnswer } = stubWorld(on)
+    setAnswer(() => {
+      throw new Error('unreachable')
+    })
+    await start($)
+    await clock.advance(1_000)
+    const ui = await $.ui.mount({ plugin: 'usage-line', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+    expect((await ui.find({ key: 'usage' }))?.text).toMatch(/5h/)
+  })
+
+  test('does not wait for, or queue behind, a clock that never answers', CLOCK, async ($, on) => {
+    const { clock, requests, setAnswer } = stubWorld(on)
+    setAnswer(() => new Promise(() => {}))
+    await start($)
+    await clock.advance(1_000)
+    expect(requests.length).toBe(1)
+    await $.session.measure({ context: { window: 1_000_000 }, rateLimits: LIMITS, changed: ['rateLimits'] }) // resolves: not awaiting the push
+    expect(requests.length).toBe(1) // skipped: one still in flight
+    await clock.advance(60_000)
+    expect(requests.length).toBe(2) // the stale one is abandoned after 10 s
   })
 })

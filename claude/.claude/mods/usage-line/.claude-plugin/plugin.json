@@ -12,6 +12,12 @@
       "title": "Fable share",
       "description": "The Fable sub-limit as a fraction of the plan's weekly allowance (see README for the calibration recipe).",
       "default": "0.40"
+    },
+    "clockUrl": {
+      "type": "string",
+      "title": "Clock URL",
+      "description": "Base URL of a Ulanzi TC002 clock to mirror the gauges on, e.g. http://192.168.1.58. Empty disables it.",
+      "default": ""
     }
   }
 }
