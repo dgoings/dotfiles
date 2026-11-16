@@ -18,6 +18,7 @@ describe('renderClock', () => {
     expect(at(p, 12, 0)).toBe(0x00d060) // top-left of "2" in 24%
     expect(at(p, 27, 0)).toBe(0x8a8a8a) // top-left of "7"
     expect(at(p, 0, 11)).toBe(0x8a8a8a) // top-left of "F"
+    expect(at(p, 12, 12)).toBe(0x00d060) // the Fable tilde takes the tier colour
   })
 
   test('fills each bar by percent and marks the pace in white', () => {

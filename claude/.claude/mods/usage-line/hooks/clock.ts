@@ -83,8 +83,8 @@ export const renderClock = (figures: ClockFigures): number[] => {
   if (figures.fable !== null) {
     const percent = reading(figures.fable, 999)
     const color = TIER_COLOR[tier(percent)]
-    const at = drawText(pixels, 0, 11, 'FB ~', LABEL)
-    const end = drawText(pixels, at, 11, `${percent}%`, color)
+    const at = drawText(pixels, 0, 11, 'FB ', LABEL)
+    const end = drawText(pixels, at, 11, `~${percent}%`, color)
     const barX = end + 1
     drawBar(pixels, barX, 12, CLOCK_W - barX, Math.min(percent, 100), null, color)
   }

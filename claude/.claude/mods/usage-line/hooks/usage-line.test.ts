@@ -30,6 +30,7 @@ const LIMITS = [FIVE, WEEK]
 const BAND = {
   hasSurvey: false,
   isWorking: false,
+  isCollapsed: false,
   maxRows: 10,
   bodyColumns: 120,
   scroll: { offset: 0, bodyRows: 10 },
