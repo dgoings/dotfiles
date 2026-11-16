@@ -4,7 +4,8 @@ export const CLOCK_W = 52
 export const CLOCK_H = 16
 
 export type ClockGauge = { percent: number; pace: number | null }
-export type ClockFigures = { five: ClockGauge | null; week: ClockGauge | null; fable: number | null }
+/** `isFableExact` marks a Fable figure the usage service reported; without it the row carries the estimate's tilde. */
+export type ClockFigures = { five: ClockGauge | null; week: ClockGauge | null; fable: number | null; isFableExact?: boolean }
 
 const TIER_COLOR = { success: 0x00d060, warning: 0xf0b000, error: 0xff3030 } as const
 const EMPTY = 0x262626
@@ -84,7 +85,7 @@ export const renderClock = (figures: ClockFigures): number[] => {
     const percent = reading(figures.fable, 999)
     const color = TIER_COLOR[tier(percent)]
     const at = drawText(pixels, 0, 11, 'FB ', LABEL)
-    const end = drawText(pixels, at, 11, `~${percent}%`, color)
+    const end = drawText(pixels, at, 11, `${figures.isFableExact ? '' : '~'}${percent}%`, color)
     const barX = end + 1
     drawBar(pixels, barX, 12, CLOCK_W - barX, Math.min(percent, 100), null, color)
   }

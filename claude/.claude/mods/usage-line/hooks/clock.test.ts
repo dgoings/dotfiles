@@ -77,6 +77,35 @@ describe('renderClock', () => {
     expect(renderClock({ ...BASE, five: { percent: NaN, pace: null } }).length).toBe(832)
   })
 
+  test('draws an exact Fable figure without the tilde, the bar starting closer', () => {
+    const p = renderClock({ ...BASE, isFableExact: true })
+    for (const y of [12, 13, 14]) {
+      expect(at(p, 24, y)).toBe(0) // one blank column after "FB 36%", 6 characters, 24 px
+      expect(at(p, 25, y)).toBe(0x00d060) // 36% of 27 cells = 10 filled, x=25..34
+      expect(at(p, 34, y)).toBe(0x00d060)
+      expect(at(p, 35, y)).toBe(0x262626)
+      expect(at(p, 51, y)).toBe(0x262626)
+    }
+    expect(at(p, 12, 11)).toBe(0x00d060) // the top of the "3" now sits where the tilde was
+  })
+
+  test('draws the estimate as before without the flag', () => {
+    expect(renderClock({ ...BASE, isFableExact: false })).toEqual(renderClock(BASE))
+    const p = renderClock(BASE)
+    for (const y of [12, 13, 14]) expect(at(p, 28, y)).toBe(0)
+  })
+
+  test('fits an exact Fable figure of 100 and over', () => {
+    for (const fable of [100, 112]) {
+      const p = renderClock({ ...BASE, fable, isFableExact: true })
+      for (const y of [12, 13, 14]) {
+        expect(at(p, 28, y)).toBe(0) // "FB 112%" is 7 characters, 28 px
+        expect(at(p, 29, y)).toBe(0xff3030) // full bar from x=29
+        expect(at(p, 51, y)).toBe(0xff3030)
+      }
+    }
+  })
+
   test('fits a Fable estimate over 100', () => {
     const p = renderClock({ ...BASE, fable: 112 })
     expect(p.length).toBe(832)
