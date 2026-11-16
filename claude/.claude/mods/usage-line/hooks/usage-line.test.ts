@@ -180,6 +180,12 @@ describe('chooseGauges', () => {
     expect(chooseGauges(snap({ service: { ...SVC, at: NOW - SERVICE_FRESH_MS - 60_000 } }), 0.4)).toEqual(TODAY)
   })
 
+  test('reads a snapshot an older version wrote, with no service fields, as having no service reading', () => {
+    const old = { model: 'Fable 5.1', rateLimits: LIMITS, spend: SPEND, now: NOW } as unknown as Parameters<typeof chooseGauges>[0]
+    expect(chooseGauges(old, 0.4)).toEqual(TODAY)
+    expect(chooseGauges(snap({ service: {} as never }), 0.4)).toEqual(TODAY)
+  })
+
   test('falls back to the estimate, scaled from the 7d figure drawn, when the service has no Fable figure', () => {
     const g = chooseGauges(snap({ service: { ...SVC, fable: null } }), 0.4)
     expect(g.week).toEqual({ percentUsed: 40 })
@@ -373,6 +379,14 @@ describe('the usage service', () => {
     expect(serviceRequests.length).toBe(0)
     // 5h from the stored reading; 7d from the session, whose reading is newer.
     expect(await band($)).toMatch(/^Fable 5\.1 {3}5h █░{9} 5% {3}7d ████░┆░░░░ 44% {3}Fable █{4}░{6} 36%$/)
+  })
+
+  test('treats a stored entry of another shape as absent', async ($, on) => {
+    const { clock, serviceRequests } = stubWorld(on, { service: { attemptAt: NOW - 10_000, reading: {} } })
+    await start($)
+    await clock.advance(1_000)
+    expect(serviceRequests.length).toBe(0) // no credential in this world
+    expect(await band($)).toMatch(TODAY)
   })
 
   test('draws an exact Fable figure of 0 as an empty bar', async ($, on) => {

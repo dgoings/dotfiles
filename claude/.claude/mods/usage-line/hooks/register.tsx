@@ -83,32 +83,46 @@ const push = async ($: EngineInterface, target: ClockTarget | null) => {
   }
 }
 
+// A stored entry is trusted only in the shape this version writes: anything else (a hand
+// edit, a partial write, another version's entry) counts as absent.
+const asServiceCache = (value: unknown): ServiceCache | undefined => {
+  if (typeof value !== 'object' || value === null) return undefined
+  const { attemptAt, reading } = value as { attemptAt?: unknown; reading?: unknown }
+  if (typeof attemptAt !== 'number') return undefined
+  if (reading === null) return { attemptAt, reading: null }
+  if (typeof reading !== 'object' || reading === undefined) return undefined
+  return typeof (reading as { at?: unknown }).at === 'number' ? { attemptAt, reading: reading as ServiceReading } : undefined
+}
+
 // Takes the reading the sessions share into this one's snapshot, and claims the next
-// request to the service when the last was a minute or more ago. The claim is stored
-// before any request goes out, so other sessions, and a request that hangs, do not pile up.
-const readService = async ($: EngineInterface): Promise<boolean> => {
+// request to the service when the last was long enough ago, answering the credential to
+// make it with. The claim is stored before any request goes out, so other sessions, and a
+// request that hangs, do not pile up. A session with no credential never claims: it could
+// not ask, and its claim would keep a session that can from asking.
+const readService = async ($: EngineInterface): Promise<string | null> => {
   try {
     const now = await $.clock.now()
-    const cached = (await $.store.get('service')) as ServiceCache | undefined
-    if (cached) await patch($, { service: cached.reading })
-    if (cached && now - cached.attemptAt < SERVICE_TTL_MS) return false
+    const cached = asServiceCache(await $.store.get('service'))
+    // `now` moves here too, so a reading ages past its five minutes even while the scan fails.
+    await patch($, cached ? { service: cached.reading, now } : { now })
+    if (cached && now - cached.attemptAt < SERVICE_TTL_MS) return null
+    const auth = await $.session.authorize()
+    if (auth === null) return null
     await $.store.set('service', { attemptAt: now, reading: cached?.reading ?? null } satisfies ServiceCache)
-    return true
+    return auth.handle
   } catch {
-    return false
+    return null
   }
 }
 
-// Asks the service, and on a usable answer shares the reading and draws it. No credential,
-// a failed request or an answer it cannot read leaves the last reading standing.
-const fetchService = async ($: EngineInterface, target: ClockTarget | null) => {
+// Asks the service, and on a usable answer shares the reading and draws it. A failed
+// request or an answer it cannot read leaves the last reading standing.
+const fetchService = async ($: EngineInterface, target: ClockTarget | null, handle: string) => {
   try {
-    const auth = await $.session.authorize()
-    if (auth === null) return
-    const res = await $.http.fetch(USAGE_URL, { auth: auth.handle, headers: { 'anthropic-beta': 'oauth-2025-04-20' } })
+    const res = await $.http.fetch(USAGE_URL, { auth: handle, headers: { 'anthropic-beta': 'oauth-2025-04-20' } })
     const reading = res.ok ? parseUsage(res.text, await $.clock.now()) : null
     if (reading === null) return
-    const cached = (await $.store.get('service')) as ServiceCache | undefined
+    const cached = asServiceCache(await $.store.get('service'))
     await $.store.set('service', { attemptAt: cached?.attemptAt ?? reading.at, reading } satisfies ServiceCache)
     await patch($, { service: reading })
     await push($, target)
@@ -121,9 +135,9 @@ const fetchService = async ($: EngineInterface, target: ClockTarget | null) => {
 // here, so one that hangs cannot hold back the scan or the clock on later ticks.
 const refresh = async ($: EngineInterface, target: ClockTarget | null) => {
   await scan($)
-  const isServiceDue = await readService($)
+  const handle = await readService($)
   await push($, target)
-  if (isServiceDue) void fetchService($, target)
+  if (handle !== null) void fetchService($, target, handle)
 }
 
 export const register: Register = (on, options) => {

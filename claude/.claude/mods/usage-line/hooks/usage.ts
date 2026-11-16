@@ -153,7 +153,9 @@ export const chooseGauges = (s: Snapshot, fableShare: number): Gauges => {
   }
   let five = session('five_hour')
   let week = session('seven_day')
-  const service = s.service !== null && s.now - s.service.at < SERVICE_FRESH_MS ? s.service : null
+  // A snapshot written by an older version of the mod, kept across a hot reload, has no service field.
+  const held = s.service ?? null
+  const service = held !== null && typeof held.at === 'number' && s.now - held.at < SERVICE_FRESH_MS ? held : null
   if (service !== null) {
     const isSessionNewer = s.rateLimitsAt > service.at
     if (five === null || !isSessionNewer) five = service.five
