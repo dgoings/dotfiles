@@ -15,6 +15,10 @@ export type Snapshot = {
   spend: Spend | null
   /** Milliseconds since the epoch at the last tick: the pace references and reset clocks read it. */
   now: number
+  /** The usage service's last reading, shared between sessions through the store; null before one. */
+  service: ServiceReading | null
+  /** When `rateLimits` was last set from `session.start` or `session.measure`, by `$.clock.now()`. */
+  rateLimitsAt: number
 }
 
 declare module 'claude-code' {

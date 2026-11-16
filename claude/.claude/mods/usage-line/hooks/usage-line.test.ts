@@ -2,8 +2,11 @@ import type { On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
+import type { Snapshot } from '../types'
 import { renderClock } from './clock'
-import { fablePercent, meter, modelName, pace, priceRows, weekWindowStart } from './usage'
+import { USAGE_URL } from './service'
+import { SAMPLE } from './service.sample'
+import { FIVE_HOURS_MS, SERVICE_FRESH_MS, SEVEN_DAYS_MS, chooseGauges, fablePercent, meter, modelName, pace, priceRows, weekWindowStart } from './usage'
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -137,33 +140,105 @@ describe('weekWindowStart', () => {
   })
 })
 
-const stubWorld = (on: On) => {
+describe('chooseGauges', () => {
+  const SVC = { at: NOW - 30_000, five: { percentUsed: 5 }, week: { percentUsed: 40 }, fable: 36 }
+  const SPEND = priceRows(SCAN)
+  const ESTIMATE = fablePercent(44, SPEND, 0.4)
+  const snap = (fields: Partial<Snapshot>): Snapshot => ({
+    model: 'Fable 5.1', rateLimits: LIMITS, spend: SPEND, now: NOW, service: null, rateLimitsAt: NOW - 60_000, ...fields,
+  })
+  const TODAY = {
+    five: { percentUsed: 23.5, resetsAt: FIVE.resetsAt },
+    week: { percentUsed: 44, resetsAt: WEEK.resetsAt },
+    fable: ESTIMATE,
+    isFableExact: false,
+  }
+
+  test('without a service reading, draws the session readings and the estimate', () => {
+    expect(ESTIMATE).toBe(Math.round((44 * (FABLE_USD / (FABLE_USD + OPUS_USD))) / 0.4))
+    expect(chooseGauges(snap({}), 0.4)).toEqual(TODAY)
+  })
+
+  test('a fresh service reading wins over older session readings', () => {
+    expect(chooseGauges(snap({ service: SVC, rateLimitsAt: NOW - 60_000 }), 0.4)).toEqual({
+      five: { percentUsed: 5 }, week: { percentUsed: 40 }, fable: 36, isFableExact: true,
+    })
+  })
+
+  test('newer session readings win over a fresh service reading, but its Fable figure stays', () => {
+    expect(chooseGauges(snap({ service: SVC, rateLimitsAt: NOW }), 0.4)).toEqual({ ...TODAY, fable: 36, isFableExact: true })
+  })
+
+  test('picks the newest reading per gauge, so a missing session window takes the service\'s', () => {
+    const g = chooseGauges(snap({ service: SVC, rateLimits: [WEEK], rateLimitsAt: NOW }), 0.4)
+    expect(g.five).toEqual({ percentUsed: 5 })
+    expect(g.week).toEqual({ percentUsed: 44, resetsAt: WEEK.resetsAt })
+  })
+
+  test('ignores a service reading five minutes old or more', () => {
+    expect(chooseGauges(snap({ service: { ...SVC, at: NOW - SERVICE_FRESH_MS } }), 0.4)).toEqual(TODAY)
+    expect(chooseGauges(snap({ service: { ...SVC, at: NOW - SERVICE_FRESH_MS - 60_000 } }), 0.4)).toEqual(TODAY)
+  })
+
+  test('falls back to the estimate, scaled from the 7d figure drawn, when the service has no Fable figure', () => {
+    const g = chooseGauges(snap({ service: { ...SVC, fable: null } }), 0.4)
+    expect(g.week).toEqual({ percentUsed: 40 })
+    expect(g.fable).toBe(fablePercent(40, SPEND, 0.4))
+    expect(g.isFableExact).toBe(false)
+  })
+
+  test('draws an exact Fable figure of 0', () => {
+    const g = chooseGauges(snap({ service: { ...SVC, fable: 0 } }), 0.4)
+    expect(g.fable).toBe(0)
+    expect(g.isFableExact).toBe(true)
+  })
+})
+
+type Request = { url: string; init?: { method?: string; headers?: Record<string, string>; body?: unknown; auth?: string } }
+
+// No credential by default, so the mod never asks the usage service unless a test opts in
+// by setting `world.auth`; `stored` pre-fills the store shared between sessions.
+const stubWorld = (on: On, stored: Record<string, unknown> = {}) => {
   const clock = mock.clock(on, { now: NOW })
-  mock.store(on)
+  mock.store(on, stored)
   mock.env(on, { HOME: '/home/t' })
   const runs: string[][] = []
-  const world = { model: 'claude-fable-5-1' }
+  const world = {
+    model: 'claude-fable-5-1',
+    limits: LIMITS as typeof LIMITS | (typeof WEEK)[],
+    auth: null as { handle: string; kind: 'bearer' } | null,
+  }
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('classic.PostModelSwitch', () => ({}))
   on('ui.render', () => ({ type: 'Box', props: {}, children: [] }))
   on('session.model', () => ({ value: world.model }))
-  on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 1_000_000 }, rateLimits: LIMITS } }))
+  on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 1_000_000 }, rateLimits: world.limits } }))
+  on('session.authorize', () => ({ value: world.auth }))
   on('process.run', (_$, e) => {
     runs.push([...e.argv])
     return { value: { exitCode: 0, stdout: SCAN, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  // Every request to the clock, and what the stub answers it with.
-  const requests: { url: string; init?: { method?: string; headers?: Record<string, string>; body?: unknown } }[] = []
+  // Every request to the clock and to the usage service, kept apart, and what the stub answers each with.
+  const requests: Request[] = []
+  const serviceRequests: Request[] = []
   let answer: () => unknown = () => ({ value: { status: 200, ok: true, headers: {}, text: '{"code":200}' } })
+  let serviceAnswer: () => unknown = () => ({ value: { status: 200, ok: true, headers: {}, text: SAMPLE } })
   on('http.fetch', (_$, e) => {
+    if (e.url === USAGE_URL) {
+      serviceRequests.push(e)
+      return serviceAnswer() as never
+    }
     requests.push(e)
     return answer() as never
   })
   const setAnswer = (next: () => unknown) => {
     answer = next
   }
-  return { clock, runs, world, requests, setAnswer }
+  const setServiceAnswer = (next: () => unknown) => {
+    serviceAnswer = next
+  }
+  return { clock, runs, world, requests, setAnswer, serviceRequests, setServiceAnswer }
 }
 
 describe('the band', () => {
@@ -243,6 +318,106 @@ describe('the band', () => {
     await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
     const survey = await $.ui.mount({ plugin: 'usage-line', surface: 'terminal', component: 'AbovePrompt', props: { ...BAND, hasSurvey: true } })
     expect(await survey.find({ key: 'usage' })).toBe(undefined)
+  })
+})
+
+describe('the usage service', () => {
+  const AUTH = { handle: 'handle-1', kind: 'bearer' as const }
+  const start = ($: Parameters<TestBody>[0]) => $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+  const band = async ($: Parameters<TestBody>[0]) => {
+    const ui = await $.ui.mount({ plugin: 'usage-line', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+    return (await ui.find({ key: 'usage' }))?.text ?? ''
+  }
+  // The band as it is drawn from the session readings and the Fable estimate alone.
+  const ESTIMATE = Math.round((44 * (FABLE_USD / (FABLE_USD + OPUS_USD))) / 0.4)
+  const TODAY = new RegExp(`^Fable 5\\.1 {3}5h ██░░░░┆░░░ 24% resets \\d\\d:\\d\\d {3}7d ████░┆░░░░ 44% {3}Fable █+░* ~${ESTIMATE}%$`)
+
+  test('draws all three gauges from the service, the Fable figure without a tilde', async ($, on) => {
+    const { clock, world, serviceRequests } = stubWorld(on)
+    world.auth = AUTH
+    await start($)
+    await clock.advance(1_000)
+
+    // The service's readings are newer than the session's; its reset times are weeks out, so both pace ticks sit at 0.
+    expect(await band($)).toMatch(/^Fable 5\.1 {3}5h ┆░{9} 0% resets \d\d:\d\d {3}7d ┆██░{7} 31% {3}Fable █{4}░{6} 36%$/)
+    expect(serviceRequests.length).toBe(1)
+    expect(serviceRequests[0]?.init?.auth).toBe('handle-1')
+    expect(serviceRequests[0]?.init?.headers?.['anthropic-beta']).toBe('oauth-2025-04-20')
+  })
+
+  test('asks at most once a minute', async ($, on) => {
+    const { clock, world, serviceRequests } = stubWorld(on)
+    world.auth = AUTH
+    await start($)
+    await clock.advance(1_000)
+    expect(serviceRequests.length).toBe(1)
+    await clock.advance(30_000)
+    await $.session.measure({ context: { window: 1_000_000 }, rateLimits: LIMITS, changed: ['rateLimits'] })
+    expect(serviceRequests.length).toBe(1)
+    await clock.advance(29_000) // the 60 s tick, 59 s after the first request
+    expect(serviceRequests.length).toBe(1)
+    await clock.advance(60_000) // the next tick, 119 s after it
+    expect(serviceRequests.length).toBe(2)
+  })
+
+  test('draws what another session fetched in the last minute, without asking again', async ($, on) => {
+    const reading = { at: NOW - 10_000, five: { percentUsed: 5 }, week: { percentUsed: 40 }, fable: 36 }
+    const { clock, world, serviceRequests } = stubWorld(on, { service: { attemptAt: NOW - 10_000, reading } })
+    world.auth = AUTH
+    world.limits = [WEEK] // a session handed no 5-hour window
+    await start($)
+    await clock.advance(1_000)
+
+    expect(serviceRequests.length).toBe(0)
+    // 5h from the stored reading; 7d from the session, whose reading is newer.
+    expect(await band($)).toMatch(/^Fable 5\.1 {3}5h █░{9} 5% {3}7d ████░┆░░░░ 44% {3}Fable █{4}░{6} 36%$/)
+  })
+
+  test('draws an exact Fable figure of 0 as an empty bar', async ($, on) => {
+    const reading = { at: NOW - 10_000, five: { percentUsed: 5 }, week: { percentUsed: 40 }, fable: 0 }
+    const { clock } = stubWorld(on, { service: { attemptAt: NOW - 10_000, reading } })
+    await start($)
+    await clock.advance(1_000)
+    expect((await band($)).endsWith('   Fable ░░░░░░░░░░ 0%')).toBe(true)
+  })
+
+  const failures: [string, () => unknown][] = [
+    ['answers 500', () => ({ value: { status: 500, ok: false, headers: {}, text: SAMPLE } })],
+    ['throws', () => { throw new Error('unreachable') }],
+    ['answers with no JSON', () => ({ value: { status: 200, ok: true, headers: {}, text: 'not json' } })],
+  ]
+  for (const [what, answer] of failures) {
+    test(`draws today's band when the service ${what}`, async ($, on) => {
+      const { clock, world, serviceRequests, setServiceAnswer } = stubWorld(on)
+      world.auth = AUTH
+      setServiceAnswer(answer)
+      await start($)
+      await clock.advance(1_000)
+
+      expect(serviceRequests.length).toBe(1)
+      expect(await band($)).toMatch(TODAY)
+    })
+  }
+
+  test('does not wait for, or pile up behind, a service that never answers', async ($, on) => {
+    const { clock, world, serviceRequests, setServiceAnswer } = stubWorld(on)
+    world.auth = AUTH
+    setServiceAnswer(() => new Promise(() => {}))
+    await start($)
+    await clock.advance(1_000)
+    expect(serviceRequests.length).toBe(1)
+    await $.session.measure({ context: { window: 1_000_000 }, rateLimits: LIMITS, changed: ['rateLimits'] })
+    await clock.advance(59_000)
+    expect(serviceRequests.length).toBe(1)
+    expect(await band($)).toMatch(TODAY)
+  })
+
+  test('makes no request to the service without a credential', async ($, on) => {
+    const { clock, serviceRequests } = stubWorld(on)
+    await start($)
+    await clock.advance(121_000)
+    expect(serviceRequests.length).toBe(0)
+    expect(await band($)).toMatch(TODAY)
   })
 })
 
@@ -329,5 +504,24 @@ describe('the clock', () => {
     expect(requests.length).toBe(1) // skipped: one still in flight
     await clock.advance(60_000)
     expect(requests.length).toBe(2) // the stale one is abandoned after 10 s
+  })
+
+  test('shows the service\'s 5H gauge for a session handed only a 7-day window', CLOCK, async ($, on) => {
+    const { clock, world, requests } = stubWorld(on)
+    world.auth = { handle: 'handle-1', kind: 'bearer' }
+    world.limits = [WEEK]
+    await start($)
+    await clock.advance(1_000)
+    const last = requests[requests.length - 1]
+    expect(last?.url).toBe('http://clock.test/api/custom?name=usage')
+    const at = NOW + 1_000
+    expect(JSON.parse(String(last?.init?.body)).draw[0].db[4]).toEqual(
+      renderClock({
+        five: { percent: 0, pace: pace(FIVE_HOURS_MS, '2026-11-16T20:30:00.205053+00:00', at) },
+        week: { percent: 31, pace: pace(SEVEN_DAYS_MS, '2026-11-19T21:00:00.205079+00:00', at) },
+        fable: 36,
+        isFableExact: true,
+      }),
+    )
   })
 })

@@ -1,4 +1,4 @@
-import type { Spend } from '../types'
+import type { Snapshot, Spend } from '../types'
 
 export const FIVE_HOURS_MS = 5 * 3_600_000
 export const SEVEN_DAYS_MS = 7 * 86_400_000
@@ -128,6 +128,40 @@ export const priceRows = (tsv: string): Spend => {
 export const fablePercent = (weekPercent: number, spend: Spend | null, share: number): number | null => {
   if (spend === null || !(spend.all > 0) || !(share > 0)) return null
   return Math.round((weekPercent * (spend.fable / spend.all)) / share)
+}
+
+export type Gauges = {
+  five: { percentUsed: number; resetsAt?: string } | null
+  week: { percentUsed: number; resetsAt?: string } | null
+  fable: number | null
+  isFableExact: boolean
+}
+
+/** How long a usage-service reading may be drawn after it was taken. */
+export const SERVICE_FRESH_MS = 5 * 60_000
+
+/**
+ * What the band and the clock draw. A service reading younger than SERVICE_FRESH_MS
+ * counts: per window, whichever of it and the session's reading is newer wins (a window
+ * the session lacks comes from the service), and its Fable figure, when it has one, is
+ * exact. Otherwise the session's windows and the Fable estimate, as before the service.
+ */
+export const chooseGauges = (s: Snapshot, fableShare: number): Gauges => {
+  const session = (kind: string): Gauges['five'] => {
+    const w = s.rateLimits.find(r => r.kind === kind)
+    return w ? { percentUsed: w.percentUsed, resetsAt: w.resetsAt } : null
+  }
+  let five = session('five_hour')
+  let week = session('seven_day')
+  const service = s.service !== null && s.now - s.service.at < SERVICE_FRESH_MS ? s.service : null
+  if (service !== null) {
+    const isSessionNewer = s.rateLimitsAt > service.at
+    if (five === null || !isSessionNewer) five = service.five
+    if (week === null || !isSessionNewer) week = service.week
+    if (service.fable !== null) return { five, week, fable: Math.round(service.fable), isFableExact: true }
+  }
+  const fable = (week && fablePercent(week.percentUsed, s.spend, fableShare)) || null
+  return { five, week, fable, isFableExact: false }
 }
 
 // Reads transcripts as raw lines and parses each individually: a transcript
