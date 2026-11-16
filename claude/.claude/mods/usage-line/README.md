@@ -116,6 +116,10 @@ A frame is pushed when a session starts, on every `session.measure` and on every
 one-minute tick, with a `duration` of 180 seconds (three ticks), so the screen updates
 only while a session is open.
 
+Once pushes stop the clock keeps showing the last frame: a frame stays lit well past its
+`duration` (checked on firmware 1.1.4 on 2026-11-16 with a 5-second frame), so between
+sessions the screen holds the last numbers, not a blank.
+
 An unreachable clock is ignored: a push is never awaited by a hook, every failure is
 swallowed, and while one push is still pending the next is skipped, until it has been
 pending for 10 seconds.
