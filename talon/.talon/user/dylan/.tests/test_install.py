@@ -14,6 +14,15 @@ spec.loader.exec_module(install)
 HERDR = {"hooks": [{"type": "command", "command": "herdr session-start"}]}
 
 
+@pytest.fixture(autouse=True)
+def fake_home(tmp_path_factory, monkeypatch):
+    """An empty home folder, so nothing depends on this Mac's ~/.talon or on
+    the interpreter living under the real home."""
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    return home
+
+
 @pytest.fixture
 def env(tmp_path):
     settings = tmp_path / "settings.json"
@@ -162,3 +171,40 @@ def test_command_quotes_odd_paths(tmp_path, monkeypatch):
     assert install.MARKER in command
     r = subprocess.run(command, shell=True, capture_output=True, text=True)
     assert (r.returncode, r.stdout) == (0, "['hook-stop']\n")
+
+
+# ---- portable paths: "$HOME/...", through ~/.talon/user ----
+
+
+def test_shell_path_writes_home_as_variable(fake_home):
+    assert install.shell_path(fake_home / "a b" / "x.py") == '"$HOME/a b/x.py"'
+    assert install.shell_path(fake_home / "it's $x") == '"$HOME/it\'s \\$x"'
+    assert install.shell_path("/opt/homebrew/bin/python3") == '"/opt/homebrew/bin/python3"'
+
+
+def test_hooks_reach_listen_through_talon_user(fake_home, tmp_path, monkeypatch):
+    # The folder lives elsewhere (the dotfiles checkout) and is linked into
+    # ~/.talon/user, as stow does.
+    repo = tmp_path / "dotfiles" / "dylan"
+    (repo / ".listening").mkdir(parents=True)
+    script = repo / ".listening" / "listen.py"
+    script.write_text("import sys; print(sys.argv[1:])\n")
+    (fake_home / ".talon" / "user").mkdir(parents=True)
+    (fake_home / ".talon" / "user" / "dylan").symlink_to(repo)
+    monkeypatch.setattr(install, "REPO", repo.resolve())
+    monkeypatch.setattr(install, "LISTEN", script.resolve())
+
+    command = install.our_entries(sys.executable)["Stop"]["hooks"][0]["command"]
+    assert '"$HOME/.talon/user/dylan/.listening/listen.py" hook-stop' in command
+    assert str(repo) not in command and install.MARKER in command
+    r = subprocess.run(command, shell=True, capture_output=True, text=True)
+    assert (r.returncode, r.stdout) == (0, "['hook-stop']\n")
+
+
+def test_skill_link_goes_through_talon_user(env, fake_home):
+    (fake_home / ".talon" / "user").mkdir(parents=True)
+    (fake_home / ".talon" / "user" / "dylan").symlink_to(install.REPO)
+    assert run(env) == 0
+    link = env[1] / "listen"
+    assert link.readlink() == fake_home / ".talon/user/dylan/.listening/skill/listen"
+    assert install.is_our_link(link)

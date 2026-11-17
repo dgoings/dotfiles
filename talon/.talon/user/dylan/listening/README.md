@@ -11,9 +11,9 @@ Claude Code replies are rewritten for the ear and spoken through Talon, so you c
 
     /opt/homebrew/bin/python3 ~/.talon/user/dylan/.listening/install.py
 
-This backs up `~/.claude/settings.json` (to `settings.json.bak-listening-<timestamp>`), adds a Stop, a Notification (`permission_prompt`) and a UserPromptSubmit hook, and links `~/.claude/skills/listen` to `.listening/skill/listen`. It only touches its own hooks; existing hooks stay. Running it again replaces its hooks with the current ones (so it also updates an older install) and otherwise changes nothing. Each hook command is wrapped in `/bin/sh -c '...; exit 0'`, so a missing or broken `listen.py` can never block or error a Claude prompt. Running sessions pick the hooks up without a restart.
+This backs up `~/.claude/settings.json` (to `settings.json.bak-listening-<timestamp>`), adds a Stop, a Notification (`permission_prompt`) and a UserPromptSubmit hook, and links `~/.claude/skills/listen` to `.listening/skill/listen`. It only touches its own hooks; existing hooks stay. Running it again replaces its hooks with the current ones (so it also updates an older install) and otherwise changes nothing. Each hook command is wrapped in `/bin/sh -c '...; exit 0'`, so a missing or broken `listen.py` can never block or error a Claude prompt. The hooks name `listen.py` as `"$HOME/.talon/user/dylan/.listening/listen.py"`, not by where the dotfiles repo is checked out, so they work on any Mac. Running sessions pick the hooks up without a restart.
 
-Options: `--settings PATH`, `--skills-dir PATH`, `--python PATH` (default `/opt/homebrew/bin/python3`, written verbatim into the hook commands; must be Python 3.10 or newer). SKILL.md uses `/opt/homebrew/bin/python3`, so a different `--python` also needs that line edited. It refuses to replace a `listen` skill folder that isn't its own link.
+Options: `--settings PATH`, `--skills-dir PATH`, `--python PATH` (default `/opt/homebrew/bin/python3`, written into the hook commands, with `$HOME` in place of the home folder; must be Python 3.10 or newer). SKILL.md uses `/opt/homebrew/bin/python3`, so a different `--python` also needs that line edited. It refuses to replace a `listen` skill folder that isn't its own link.
 
 Remove everything it added (hooks and link only, with another backup):
 

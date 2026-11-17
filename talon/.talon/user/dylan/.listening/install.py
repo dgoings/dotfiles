@@ -6,6 +6,10 @@
 Only touches hook entries whose command contains `/.listening/listen.py`, and the
 `<skills-dir>/listen` symlink when it points at this repo's skill. Re-running it
 replaces our entries with the current ones, so it also refreshes old installs.
+
+Paths go into the hooks as "$HOME/...", reached through ~/.talon/user (where
+this folder is linked in from the dotfiles repo), so the same settings work on
+any Mac whatever the username or the dotfiles checkout's location.
 """
 import argparse
 import json
@@ -44,12 +48,37 @@ def _double_quoted(path) -> str:
     return f'"{escaped}"'
 
 
+def shell_path(path) -> str:
+    """`path` for the hook's shell, double-quoted. A path in the home folder
+    is written as "$HOME/..." so it doesn't name this Mac's user."""
+    path, home = Path(path), Path.home()
+    try:
+        rest = path.relative_to(home)
+    except ValueError:
+        return _double_quoted(path)
+    return '"$HOME/' + _double_quoted(rest)[1:]
+
+
+def via_talon_user(target: Path) -> Path:
+    """`target` as reached through ~/.talon/user, if this folder is linked in
+    there; otherwise `target` itself. Keeps the hooks and the skill link from
+    naming where the dotfiles repo is checked out."""
+    try:
+        for child in sorted((Path.home() / ".talon" / "user").iterdir()):
+            if child.resolve() == REPO:
+                return child / target.relative_to(REPO)
+    except (OSError, ValueError):
+        pass
+    return target
+
+
 def hook_command(python: str, sub: str) -> str:
     """The hook command. It always exits 0 and stays quiet on stderr, so a
     missing or broken listen.py can never block or error a Claude prompt
     (UserPromptSubmit blocks the prompt on exit 2). Stdout passes through
     for hook-prompt's JSON."""
-    script = f"{_double_quoted(python)} {_double_quoted(LISTEN)} {sub} 2>/dev/null; exit 0"
+    listen = shell_path(via_talon_user(LISTEN))
+    script = f"{shell_path(python)} {listen} {sub} 2>/dev/null; exit 0"
     return f"/bin/sh -c {shlex.quote(script)}"
 
 
@@ -206,7 +235,7 @@ def main(argv=None) -> int:
     write_settings(settings_path, settings)
     if not is_our_link(link):
         link.parent.mkdir(parents=True, exist_ok=True)
-        link.symlink_to(SKILL_SRC)
+        link.symlink_to(via_talon_user(SKILL_SRC))
     print(f"Installed listening hooks (python: {python}) and skill link {link}.")
     return 0
 
