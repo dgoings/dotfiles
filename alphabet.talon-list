@@ -1,0 +1,33 @@
+list: user.letter
+os: mac
+-
+# Dylan's alphabet. Replaces community/core/keys/letter.talon-list (the
+# "os: mac" header makes Talon prefer this list), so community updates can't
+# overwrite it. It must list all 26 letters. Changed from the community
+# alphabet: d (drum -> dumb), g (gust -> god), o (odd -> orange), n (near -> nada).
+air: a
+bat: b
+cap: c
+dumb: d
+each: e
+fine: f
+god: g
+harp: h
+sit: i
+jury: j
+crunch: k
+look: l
+made: m
+nada: n
+orange: o
+pit: p
+quench: q
+red: r
+sun: s
+trap: t
+urge: u
+vest: v
+whale: w
+plex: x
+yank: y
+zip: z
