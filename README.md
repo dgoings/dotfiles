@@ -10,6 +10,7 @@ Personal dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow/).
 | `fish`   | fish shell — vi keybinds, abbreviations, fisher plugins |
 | `ghostty`| Ghostty terminal — Abernathy theme, JuliaMono font      |
 | `git`    | `.gitconfig` and `.githelpers`                          |
+| `talon`  | Talon user scripts (`~/.talon/user/dylan`) — Ulanzi remote, listening mode, Rango toggle |
 | `tmux`   | `.tmux.conf` — `C-g` prefix, vim pane navigation        |
 | `zsh`    | `.zshrc` (oh-my-zsh)                                    |
 
@@ -23,9 +24,20 @@ brew install --cask font-juliamono   # font used by the ghostty package
 # Clone
 git clone https://github.com/dgoings/dotfiles.git ~/source/dotfiles
 
+# Talon's shared scripts (not in this repo), cloned beside the talon package
+mkdir -p ~/.talon/user
+git clone https://github.com/talonhub/community ~/.talon/user/community
+git clone https://github.com/david-tejada/rango-talon ~/.talon/user/rango-talon
+
 # Symlink everything
 cd ~/source/dotfiles && stow */
 ```
+
+**Create `~/.talon/user` before stowing.** If it doesn't exist, stow links the whole of
+`~/.talon` into this repo, and Talon then writes its logs and runtime files here. With the
+folder in place, stow links only `~/.talon/user/dylan`. The talon package's own setup
+(Claude Code hooks, Kokoro voice, Ulanzi Studio preset) is in
+`talon/.talon/user/dylan/listening/README.md` and `ulanzi/ulanzi.talon`.
 
 **Run stow from the repo root.** Stow's default target is the *parent* of the stow directory,
 not `$HOME`. The repo-local `.stowrc` sets `--target=~` to fix this, but stow only reads it

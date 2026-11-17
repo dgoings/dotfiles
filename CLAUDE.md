@@ -31,6 +31,7 @@ Example: `~/.config/fish/config.fish` lives at `fish/.config/fish/config.fish` i
 | fish    | `~/.config/` | fish shell — vi keybinds, abbrs, fisher plugins (fzf, nvm)       |
 | ghostty | `~/Library/Application Support/com.mitchellh.ghostty/` | Ghostty — Abernathy theme, JuliaMono font (`brew install --cask font-juliamono`) |
 | git     | `~/`         | `.gitconfig` and `.githelpers`                                   |
+| talon   | `~/.talon/user/dylan/` | Talon user scripts — Ulanzi AU05 remote, listening mode, Rango toggle (see below) |
 | tmux    | `~/`         | `.tmux.conf` — `C-g` prefix, vim pane nav, 256-colour status bar |
 | zsh     | `~/`         | `.zshrc` (oh-my-zsh)                                             |
 
@@ -93,6 +94,27 @@ git lock claude/.claude/settings.json
 
 `git locked` lists every skip-worktree file. If a settings change you made seems not to be
 committable, this bit is why.
+
+## Talon package
+
+`talon/.talon/user/dylan/` is the Talon user folder: Ulanzi AU05 remote controls, listening
+mode (Claude Code replies spoken aloud), the Rango on/off toggle, and spoken app names. Talon
+reloads files the moment they change, so edits here take effect at once.
+
+- **Stow it as one folder link.** `~/.talon/user` must exist as a real folder before
+  `stow talon`, so stow links just `~/.talon/user/dylan`. Without it, stow links all of
+  `~/.talon` into this repo and Talon's logs and runtime files land here.
+- **`community` and `rango-talon` aren't in this repo.** They are their own git clones in
+  `~/.talon/user/`. Don't edit them: put overrides in this package instead (for example
+  `apps/app_names.py` supplies the app-switcher names community would read from its CSV).
+- **Ignored, machine-local files** live inside the package: `.venv/` (pytest, for the tests)
+  and `.listening/tts/venv/` (the Kokoro voice, made by `.listening/tts/setup.sh`). Its
+  `.gitignore` keeps them out of git.
+- **Tests:** unlike the rest of the repo, this package has some. Run
+  `.venv/bin/python -m pytest -q .tests` from the package folder.
+- **Older history** comes from the folder's own repo, merged in by commit `b9a1d03`. Those
+  commits use paths relative to the folder, so `git log -- talon/` stops at the merge; read
+  them with `git log b9a1d03^2`.
 
 ## Working in this Repo
 
