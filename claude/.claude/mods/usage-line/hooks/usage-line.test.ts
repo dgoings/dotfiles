@@ -6,7 +6,7 @@ import type { Snapshot } from '../types'
 import { renderClock } from './clock'
 import { USAGE_URL } from './service'
 import { SAMPLE } from './service.sample'
-import { FIVE_HOURS_MS, SERVICE_FRESH_MS, SEVEN_DAYS_MS, chooseGauges, fablePercent, meter, modelName, pace, priceRows, weekWindowStart } from './usage'
+import { FIVE_HOURS_MS, SERVICE_FABLE_FRESH_MS, SEVEN_DAYS_MS, chooseGauges, fablePercent, meter, modelName, pace, priceRows, weekWindowStart } from './usage'
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -144,8 +144,13 @@ describe('chooseGauges', () => {
   const SVC = { at: NOW - 30_000, five: { percentUsed: 5 }, week: { percentUsed: 40 }, fable: 36 }
   const SPEND = priceRows(SCAN)
   const ESTIMATE = fablePercent(44, SPEND, 0.4)
+  // What the sessions shared: both windows, measured a minute ago.
+  const READINGS = {
+    five_hour: { at: NOW - 60_000, percentUsed: 23.5, resetsAt: FIVE.resetsAt },
+    seven_day: { at: NOW - 60_000, percentUsed: 44, resetsAt: WEEK.resetsAt },
+  }
   const snap = (fields: Partial<Snapshot>): Snapshot => ({
-    model: 'Fable 5.1', rateLimits: LIMITS, spend: SPEND, now: NOW, service: null, rateLimitsAt: NOW - 60_000, ...fields,
+    model: 'Fable 5.1', spend: SPEND, now: NOW, service: null, readings: READINGS, ...fields,
   })
   const TODAY = {
     five: { percentUsed: 23.5, resetsAt: FIVE.resetsAt },
@@ -154,35 +159,67 @@ describe('chooseGauges', () => {
     isFableExact: false,
   }
 
-  test('without a service reading, draws the session readings and the estimate', () => {
+  test('without a service reading, draws the shared session readings and the estimate', () => {
     expect(ESTIMATE).toBe(Math.round((44 * (FABLE_USD / (FABLE_USD + OPUS_USD))) / 0.4))
     expect(chooseGauges(snap({}), 0.4)).toEqual(TODAY)
   })
 
-  test('a fresh service reading wins over older session readings', () => {
-    expect(chooseGauges(snap({ service: SVC, rateLimitsAt: NOW - 60_000 }), 0.4)).toEqual({
+  test('a newer service reading wins over older shared readings', () => {
+    expect(chooseGauges(snap({ service: SVC }), 0.4)).toEqual({
       five: { percentUsed: 5 }, week: { percentUsed: 40 }, fable: 36, isFableExact: true,
     })
   })
 
-  test('newer session readings win over a fresh service reading, but its Fable figure stays', () => {
-    expect(chooseGauges(snap({ service: SVC, rateLimitsAt: NOW }), 0.4)).toEqual({ ...TODAY, fable: 36, isFableExact: true })
+  test('newer shared readings win over the service reading, but its Fable figure stays', () => {
+    const readings = { five_hour: { ...READINGS.five_hour, at: NOW }, seven_day: { ...READINGS.seven_day, at: NOW } }
+    expect(chooseGauges(snap({ service: SVC, readings }), 0.4)).toEqual({ ...TODAY, fable: 36, isFableExact: true })
   })
 
-  test('picks the newest reading per gauge, so a missing session window takes the service\'s', () => {
-    const g = chooseGauges(snap({ service: SVC, rateLimits: [WEEK], rateLimitsAt: NOW }), 0.4)
+  test('picks the newest reading per gauge, so a window no session shared takes the service\'s', () => {
+    const g = chooseGauges(snap({ service: SVC, readings: { seven_day: { ...READINGS.seven_day, at: NOW } } }), 0.4)
     expect(g.five).toEqual({ percentUsed: 5 })
     expect(g.week).toEqual({ percentUsed: 44, resetsAt: WEEK.resetsAt })
   })
 
-  test('ignores a service reading five minutes old or more', () => {
-    expect(chooseGauges(snap({ service: { ...SVC, at: NOW - SERVICE_FRESH_MS } }), 0.4)).toEqual(TODAY)
-    expect(chooseGauges(snap({ service: { ...SVC, at: NOW - SERVICE_FRESH_MS - 60_000 } }), 0.4)).toEqual(TODAY)
+  test('draws an old service reading rather than nothing', () => {
+    const g = chooseGauges(snap({ service: { ...SVC, at: NOW - 2 * HOUR }, readings: null }), 0.4)
+    expect(g.five).toEqual({ percentUsed: 5 })
+    expect(g.week).toEqual({ percentUsed: 40 })
   })
 
-  test('reads a snapshot an older version wrote, with no service fields, as having no service reading', () => {
+  test('draws the service\'s Fable figure while under an hour old, the estimate from the 7d gauge after', () => {
+    const young = chooseGauges(snap({ service: { ...SVC, at: NOW - SERVICE_FABLE_FRESH_MS + 1 }, readings: null }), 0.4)
+    expect(young.fable).toBe(36)
+    expect(young.isFableExact).toBe(true)
+    const old = chooseGauges(snap({ service: { ...SVC, at: NOW - SERVICE_FABLE_FRESH_MS }, readings: null }), 0.4)
+    expect(old.week).toEqual({ percentUsed: 40 })
+    expect(old.fable).toBe(fablePercent(40, SPEND, 0.4))
+    expect(old.isFableExact).toBe(false)
+  })
+
+  test('reads a window that has ended as 0% with no reset time', () => {
+    const ended = { at: NOW - 6 * HOUR, percentUsed: 80, resetsAt: new Date(NOW - HOUR).toISOString() }
+    expect(chooseGauges(snap({ readings: { ...READINGS, five_hour: ended } }), 0.4).five).toEqual({ percentUsed: 0 })
+    const endsNow = { ...ended, resetsAt: new Date(NOW).toISOString() }
+    expect(chooseGauges(snap({ readings: { ...READINGS, five_hour: endsNow } }), 0.4).five).toEqual({ percentUsed: 0 })
+    const svc = { ...SVC, five: { percentUsed: 70, resetsAt: ended.resetsAt } }
+    expect(chooseGauges(snap({ service: svc, readings: null }), 0.4).five).toEqual({ percentUsed: 0 })
+  })
+
+  test('an ended window gives way to a reading of a later window, though of unknown age', () => {
+    const svc = { ...SVC, at: NOW - 6 * HOUR, five: { percentUsed: 70, resetsAt: new Date(NOW - HOUR).toISOString() } }
+    const started = { at: 0, percentUsed: 12, resetsAt: FIVE.resetsAt }
+    expect(chooseGauges(snap({ service: svc, readings: { five_hour: started } }), 0.4).five).toEqual({ percentUsed: 12, resetsAt: FIVE.resetsAt })
+  })
+
+  test('never draws a session\'s own readings, only what is shared', () => {
+    const own = { ...snap({ readings: null }), rateLimits: LIMITS, rateLimitsAt: NOW } as Snapshot
+    expect(chooseGauges(own, 0.4)).toEqual({ five: null, week: null, fable: null, isFableExact: false })
+  })
+
+  test('reads a snapshot an older version wrote, with no shared fields, as having no readings', () => {
     const old = { model: 'Fable 5.1', rateLimits: LIMITS, spend: SPEND, now: NOW } as unknown as Parameters<typeof chooseGauges>[0]
-    expect(chooseGauges(old, 0.4)).toEqual(TODAY)
+    expect(chooseGauges(old, 0.4)).toEqual({ five: null, week: null, fable: null, isFableExact: false })
     expect(chooseGauges(snap({ service: {} as never }), 0.4)).toEqual(TODAY)
   })
 
@@ -203,17 +240,34 @@ describe('chooseGauges', () => {
 type Request = { url: string; init?: { method?: string; headers?: Record<string, string>; body?: unknown; auth?: string } }
 
 // No credential by default, so the mod never asks the usage service unless a test opts in
-// by setting `world.auth`; `stored` pre-fills the store shared between sessions.
+// by setting `world.auth`; `stored` pre-fills the store shared between sessions. The store is
+// this stub's own, not mock.store's, so a test can read what the mod wrote (`store`) and make a
+// key refuse writes (`world.unwritable`).
 const stubWorld = (on: On, stored: Record<string, unknown> = {}) => {
   const clock = mock.clock(on, { now: NOW })
-  mock.store(on, stored)
   mock.env(on, { HOME: '/home/t' })
   const runs: string[][] = []
   const world = {
     model: 'claude-fable-5-1',
     limits: LIMITS as typeof LIMITS | (typeof WEEK)[],
     auth: null as { handle: string; kind: 'bearer' } | null,
+    unwritable: new Set<string>(),
   }
+  // Values go through JSON, as the engine keeps them.
+  const entries = new Map<string, unknown>(Object.entries(structuredClone(stored)))
+  const store = (key: string) => entries.get(key)
+  const put = (key: string, value: unknown) => entries.set(key, structuredClone(value))
+  on('store.get', (_$, e) => ({ value: entries.get(e.key) }))
+  on('store.set', (_$, e) => {
+    if (world.unwritable.has(e.key)) throw new Error(`store refused ${e.key}`)
+    entries.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined }
+  })
+  on('store.delete', (_$, e) => {
+    entries.delete(e.key)
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: [...entries.keys()] }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('classic.PostModelSwitch', () => ({}))
@@ -244,7 +298,7 @@ const stubWorld = (on: On, stored: Record<string, unknown> = {}) => {
   const setServiceAnswer = (next: () => unknown) => {
     serviceAnswer = next
   }
-  return { clock, runs, world, requests, setAnswer, serviceRequests, setServiceAnswer }
+  return { clock, runs, world, store, put, requests, setAnswer, serviceRequests, setServiceAnswer }
 }
 
 describe('the band', () => {
@@ -351,21 +405,137 @@ describe('the usage service', () => {
     expect(serviceRequests[0]?.init?.headers?.['anthropic-beta']).toBe('oauth-2025-04-20')
   })
 
-  test('asks once per tick, not once per measurement', async ($, on) => {
+  test('asks about every five minutes, not every tick or measurement', async ($, on) => {
     const { clock, world, serviceRequests } = stubWorld(on)
     world.auth = AUTH
     await start($)
     await clock.advance(1_000)
     expect(serviceRequests.length).toBe(1)
-    await clock.advance(30_000)
     await $.session.measure({ context: { window: 1_000_000 }, rateLimits: LIMITS, changed: ['rateLimits'] })
+    await clock.set(NOW + 4 * 60_000) // the fourth tick
     expect(serviceRequests.length).toBe(1)
-    await clock.advance(29_000) // the 60 s tick, 59 s after the first request
+    await clock.set(NOW + 5 * 60_000) // the fifth tick, 299 s after the first request
     expect(serviceRequests.length).toBe(2)
-    await $.session.measure({ context: { window: 1_000_000 }, rateLimits: LIMITS, changed: ['rateLimits'] })
+    await clock.set(NOW + 9 * 60_000)
     expect(serviceRequests.length).toBe(2)
-    await clock.advance(60_000) // the next tick
+    await clock.set(NOW + 10 * 60_000)
     expect(serviceRequests.length).toBe(3)
+  })
+
+  const REFUSED = () => ({
+    value: { status: 429, ok: false, headers: { 'retry-after': '0' }, text: '{"error":{"type":"rate_limit_error","message":"Rate limited. Please try again later."}}' },
+  })
+
+  test('backs off after each refusal: 10 minutes, then 20, then 30, and no more', async ($, on) => {
+    const { clock, world, serviceRequests, setServiceAnswer, store } = stubWorld(on)
+    world.auth = AUTH
+    setServiceAnswer(REFUSED)
+    await start($)
+    await clock.advance(1_000)
+    const MIN = 60_000
+    // [when, requests so far]: attempts at 0:01, 10:00, 30:00, 60:00 and 90:00.
+    const steps: [number, number][] = [
+      [9 * MIN, 1], [10 * MIN, 2], [29 * MIN, 2], [30 * MIN, 3], [59 * MIN, 3], [60 * MIN, 4], [89 * MIN, 4], [90 * MIN, 5],
+    ]
+    for (const [at, count] of steps) {
+      await clock.set(NOW + at)
+      expect(serviceRequests.length, `requests by ${at / MIN} min`).toBe(count)
+    }
+    expect(((store('service')) as { failures?: number }).failures).toBe(5)
+  })
+
+  test('counts a thrown request and an unreadable answer as refusals too', async ($, on) => {
+    const { clock, world, serviceRequests, setServiceAnswer, store } = stubWorld(on)
+    world.auth = AUTH
+    setServiceAnswer(() => { throw new Error('unreachable') })
+    await start($)
+    await clock.advance(1_000)
+    setServiceAnswer(() => ({ value: { status: 200, ok: true, headers: {}, text: 'not json' } }))
+    await clock.set(NOW + 9 * 60_000)
+    expect(serviceRequests.length).toBe(1)
+    await clock.set(NOW + 10 * 60_000)
+    expect(serviceRequests.length).toBe(2)
+    await clock.set(NOW + 29 * 60_000)
+    expect(serviceRequests.length).toBe(2)
+    expect(((store('service')) as { failures?: number }).failures).toBe(2)
+  })
+
+  test('returns to every five minutes after a success', async ($, on) => {
+    const { clock, world, serviceRequests, setServiceAnswer, store } = stubWorld(on)
+    world.auth = AUTH
+    setServiceAnswer(REFUSED)
+    await start($)
+    await clock.advance(1_000)
+    setServiceAnswer(() => ({ value: { status: 200, ok: true, headers: {}, text: SAMPLE } }))
+    await clock.set(NOW + 10 * 60_000)
+    expect(serviceRequests.length).toBe(2)
+    expect(((store('service')) as { failures?: number }).failures).toBe(0)
+    await clock.set(NOW + 14 * 60_000)
+    expect(serviceRequests.length).toBe(2)
+    await clock.set(NOW + 15 * 60_000)
+    expect(serviceRequests.length).toBe(3)
+  })
+
+  test('honours a back-off another session stored', async ($, on) => {
+    const { clock, world, serviceRequests } = stubWorld(on, { service: { attemptAt: NOW - 15 * 60_000, reading: null, failures: 2 } })
+    world.auth = AUTH
+    await start($)
+    await clock.advance(1_000)
+    expect(serviceRequests.length).toBe(0)
+    await clock.set(NOW + 4 * 60_000)
+    expect(serviceRequests.length).toBe(0)
+    await clock.set(NOW + 5 * 60_000) // 20 minutes after that session's attempt
+    expect(serviceRequests.length).toBe(1)
+  })
+
+  test('treats a stored failure count of another shape as an absent entry', async ($, on) => {
+    const { clock, world, serviceRequests } = stubWorld(on, { service: { attemptAt: NOW - 10_000, reading: null, failures: 'two' } })
+    world.auth = AUTH
+    await start($)
+    await clock.advance(1_000)
+    expect(serviceRequests.length).toBe(1)
+  })
+
+  test('keeps a note of why the service last failed', async ($, on) => {
+    const { clock, world, setServiceAnswer, store } = stubWorld(on)
+    world.auth = AUTH
+    setServiceAnswer(REFUSED)
+    await start($)
+    await clock.advance(1_000)
+    expect(store('serviceFailure')).toEqual({
+      at: NOW + 1_000, status: 429, retryAfter: '0', text: REFUSED().value.text,
+    })
+    setServiceAnswer(() => { throw new Error('unreachable') })
+    await clock.set(NOW + 10 * 60_000)
+    // The harness hands the plugin its own error for a stub that throws, so only the shape is checked.
+    expect(store('serviceFailure')).toEqual({ at: NOW + 10 * 60_000, status: null, retryAfter: null, text: expect.stringMatching(/Error/) })
+  })
+
+  test('still backs off and draws when the note cannot be written', async ($, on) => {
+    const { clock, world, serviceRequests, setServiceAnswer, store } = stubWorld(on)
+    world.auth = AUTH
+    world.unwritable.add('serviceFailure')
+    setServiceAnswer(REFUSED)
+    await start($)
+    await clock.advance(1_000)
+    expect(serviceRequests.length).toBe(1)
+    expect(((store('service')) as { failures?: number }).failures).toBe(1)
+    await clock.set(NOW + 9 * 60_000)
+    expect(serviceRequests.length).toBe(1)
+    expect(await band($)).toMatch(TODAY)
+  })
+
+  test('draws the last service reading, however old, while the service refuses', async ($, on) => {
+    const at = NOW - 17 * 60_000
+    const reading = { at, five: { percentUsed: 5 }, week: { percentUsed: 40 }, fable: 36 }
+    const { clock, world, setServiceAnswer } = stubWorld(on, { service: { attemptAt: at, reading } })
+    world.auth = AUTH
+    world.limits = [WEEK] // a session handed no 5-hour window, as in T3 Code
+    setServiceAnswer(REFUSED)
+    await start($)
+    await clock.advance(1_000)
+    // 5h and Fable from the stored reading; 7d too, since the session's own is of unknown age.
+    expect(await band($)).toMatch(/^Fable 5\.1 {3}5h █░{9} 5% {3}7d ████░{6} 40% {3}Fable █{4}░{6} 36%$/)
   })
 
   test('draws what another session fetched in the last minute, without asking again', async ($, on) => {
@@ -377,8 +547,8 @@ describe('the usage service', () => {
     await clock.advance(1_000)
 
     expect(serviceRequests.length).toBe(0)
-    // 5h from the stored reading; 7d from the session, whose reading is newer.
-    expect(await band($)).toMatch(/^Fable 5\.1 {3}5h █░{9} 5% {3}7d ████░┆░░░░ 44% {3}Fable █{4}░{6} 36%$/)
+    // Both windows from the stored reading: a session's start reading is of unknown age, so it ranks below it.
+    expect(await band($)).toMatch(/^Fable 5\.1 {3}5h █░{9} 5% {3}7d ████░{6} 40% {3}Fable █{4}░{6} 36%$/)
   })
 
   test('treats a stored entry of another shape as absent', async ($, on) => {
@@ -434,6 +604,87 @@ describe('the usage service', () => {
     await clock.advance(121_000)
     expect(serviceRequests.length).toBe(0)
     expect(await band($)).toMatch(TODAY)
+  })
+})
+
+describe('shared session readings', () => {
+  const start = ($: Parameters<TestBody>[0]) => $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+  const band = async ($: Parameters<TestBody>[0]) => {
+    const ui = await $.ui.mount({ plugin: 'usage-line', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+    return (await ui.find({ key: 'usage' }))?.text ?? ''
+  }
+
+  test('shares a measurement, stamped with the time it was taken, over what was stored', async ($, on) => {
+    const { clock, store } = stubWorld(on, { readings: { five_hour: { at: NOW - 60_000, percentUsed: 10 } } })
+    await start($)
+    await clock.advance(1_000)
+    await $.session.measure({ context: { window: 1_000_000 }, rateLimits: [{ ...FIVE, percentUsed: 81 }, { ...WEEK, percentUsed: 55 }], changed: ['rateLimits'] })
+    expect(store('readings')).toEqual({
+      five_hour: { at: NOW + 1_000, percentUsed: 81, resetsAt: FIVE.resetsAt },
+      seven_day: { at: NOW + 1_000, percentUsed: 55, resetsAt: WEEK.resetsAt },
+    })
+  })
+
+  test('a session start fills only a window nothing is stored for, as of unknown age', async ($, on) => {
+    const week = { at: NOW - 3 * DAY, percentUsed: 50, resetsAt: WEEK.resetsAt }
+    const { clock, store } = stubWorld(on, { readings: { seven_day: week } })
+    await start($)
+    await clock.advance(1_000)
+    expect(store('readings')).toEqual({
+      five_hour: { at: 0, percentUsed: 23.5, resetsAt: FIVE.resetsAt },
+      seven_day: week,
+    })
+    expect(await band($)).toMatch(/ 7d █████┆░░░░ 50% /)
+  })
+
+  test('treats a stored entry of another shape as absent', async ($, on) => {
+    const { clock, store } = stubWorld(on, { readings: { five_hour: { at: 'x', percentUsed: 5 }, seven_day: 'junk' } })
+    await start($)
+    await clock.advance(1_000)
+    expect(store('readings')).toEqual({
+      five_hour: { at: 0, percentUsed: 23.5, resetsAt: FIVE.resetsAt },
+      seven_day: { at: 0, percentUsed: 44, resetsAt: WEEK.resetsAt },
+    })
+  })
+
+  test('draws what the sessions shared, not its own readings', { options: { clockUrl: 'http://clock.test/' } }, async ($, on) => {
+    const readings = {
+      five_hour: { at: NOW - 60_000, percentUsed: 70, resetsAt: FIVE.resetsAt },
+      seven_day: { at: NOW - 60_000, percentUsed: 60, resetsAt: WEEK.resetsAt },
+    }
+    const { clock, requests } = stubWorld(on, { readings })
+    await start($)
+    await clock.advance(1_000)
+    expect(await band($)).toMatch(/ 5h .* 70% .* 7d .* 60% /)
+    const last = requests[requests.length - 1]
+    const at = NOW + 1_000
+    expect(JSON.parse(String(last?.init?.body)).draw[0].db[4]).toEqual(
+      renderClock({
+        five: { percent: 70, pace: pace(FIVE_HOURS_MS, FIVE.resetsAt, at) },
+        week: { percent: 60, pace: pace(SEVEN_DAYS_MS, WEEK.resetsAt, at) },
+        fable: fablePercent(60, priceRows(SCAN), 0.4),
+      }),
+    )
+  })
+
+  test('a push draws what another session shared since this one last looked', { options: { clockUrl: 'http://clock.test/' } }, async ($, on) => {
+    const { clock, requests, store, put } = stubWorld(on)
+    await start($)
+    await clock.advance(1_000)
+    // Another session measures a 5-hour window between this one's ticks.
+    const stored = store('readings') as Record<string, unknown>
+    put('readings', { ...stored, five_hour: { at: NOW + 2_000, percentUsed: 90, resetsAt: FIVE.resetsAt } })
+    await clock.advance(1_000)
+    await $.session.measure({ context: { window: 1_000_000 }, rateLimits: [{ ...WEEK, percentUsed: 55 }], changed: ['rateLimits'] })
+    const last = requests[requests.length - 1]
+    const at = NOW + 2_000
+    expect(JSON.parse(String(last?.init?.body)).draw[0].db[4]).toEqual(
+      renderClock({
+        five: { percent: 90, pace: pace(FIVE_HOURS_MS, FIVE.resetsAt, at) },
+        week: { percent: 55, pace: pace(SEVEN_DAYS_MS, WEEK.resetsAt, at) },
+        fable: fablePercent(55, priceRows(SCAN), 0.4),
+      }),
+    )
   })
 })
 

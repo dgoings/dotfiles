@@ -16,9 +16,11 @@ Fable 5.1 | 5h 24%/60% (resets 15:00) | 7d 44%/50% | Fable ~36%
   (Fable)"): the figure the usage service reports, or, with a tilde, a local estimate
   when it has none.
 
-The figures come from Claude Code's usage service when it has answered recently, and
-otherwise from what the engine hands the session (`session.measure`). A one-minute tick
-keeps the pace references and reset clock moving between turns.
+The figures come from a record every open session shares: the newest reading of each
+window that any session has been handed (`session.measure`), and the last answer from
+Claude Code's usage service. Every session draws from that record alone, so the band in
+each session and the clock agree. A one-minute tick keeps the pace references and reset
+clock moving between turns.
 
 ## Loading
 
@@ -43,26 +45,63 @@ all three gauges, including the real Fable percentage, which the engine hands a 
 nowhere else. Sessions inside an Agent SDK host such as T3 Code are handed a 7-day
 reading but no 5-hour one; the service fills that gap.
 
-- **Once a minute, shared.** Only the one-minute tick asks, never a hook. The sessions
-  share one store entry (`service`): when any session last asked and the last reading it
-  got. A session asks only when the last attempt is 50 seconds old or more (just under a
-  tick, so the next tick is never a moment short), and stamps the
-  attempt before the request goes out, so open sessions, or a request that hangs, do not
-  pile up. Every session draws the same reading.
-- **Five minutes fresh.** A reading is drawn for five minutes after it was taken. While
-  it counts, each of the 5h and 7d gauges takes whichever is newer, the service's reading
-  or the session's own, and a window the session lacks comes from the service. Its Fable
-  figure is drawn without the tilde, 0 included.
-- **Fallback.** No first-party credential (a third-party provider, a gateway, no login),
-  a failed or refused request, an answer it cannot read, or a reading five minutes old
-  leaves the mod drawing exactly what it drew before the service: the session's windows
-  and the Fable estimate below. A field missing from the answer drops only its own gauge.
+- **About every five minutes, shared.** Only the one-minute tick asks, never a hook. The
+  sessions share one store entry (`service`): when any session last asked, the last
+  reading it got, and how many requests in a row have failed. A session asks only when the
+  last attempt is 4 minutes 50 seconds old or more (just under five ticks, so the fifth
+  tick is never a moment short), and stamps the attempt before the request goes out, so
+  open sessions, or a request that hangs, do not pile up. Asked every minute, the service
+  answered `429` (`rate_limit_error`) to every request.
+- **Back-off.** A failed request (not 2xx, an answer it cannot read, or one that throws)
+  adds one to the entry's failure count, and the wait before the next attempt becomes 10
+  minutes, then 20, then 30, and stays at 30 (each 10 seconds short, as above). Because the
+  count lives in the shared entry, every session honours it. A usable answer sets it back
+  to 0 and the wait to five minutes. An entry with no count, as the version before the
+  back-off wrote, counts as none failed.
+- **Why it failed.** Each failure is noted under the store key `serviceFailure`: `at` (when),
+  `status` and `retryAfter` (the HTTP status and `retry-after` header, null when the
+  request threw) and `text` (the first 300 characters of the body, or the error). Look
+  there first when the service's reading has gone stale.
+
+### Shared session readings
+
+The sessions also share, under the store key `readings`, the newest reading of each
+window (`five_hour`, `seven_day`) any of them has been handed, each with the time it was
+measured. A `session.measure` reading is stamped with the time it fired and replaces the
+stored one. A `session.start` reading is of unknown age (a resumed session can hand back
+numbers days old), so it is stored only for a window nothing is stored for yet, stamped 0,
+and loses to any reading of known age. Sessions differ a lot in what they are handed: one
+idle for days holds days-old numbers, and sessions inside an Agent SDK host get no 5-hour
+window at all. Before the record was shared, each session drew its own and pushed it to
+the clock, and the clock flipped between them.
+
+### What is drawn
+
+Per window, the newest of the shared session reading and the service's, however old:
+an old reading beats none. A session's own readings are never drawn directly, only through
+the record, so two sessions with the same store draw the same gauges. Each session copies
+the record into its snapshot on every tick and again just before every push, so a push one
+session makes never draws older data than another's last push.
+
+A reading whose window has ended (its reset time has passed) is drawn as 0% with no reset
+time, unless another reading of that window has a reset still ahead (a reading of the
+later window, which a session start's can be).
+
+The Fable figure is the service's, drawn without the tilde, 0 included, while its reading
+is under an hour old; after that, or with no Fable figure in the answer, the estimate below,
+scaled from the 7d gauge drawn.
+
+When the service is unavailable (no first-party credential: a third-party provider, a
+gateway, no login; or every request failing), the 5h and 7d gauges come from the shared
+session readings and the last service reading, whichever is newer, and the Fable figure
+from the estimate once the last reading is an hour old. A field missing from the answer
+drops only its own gauge.
 
 ## The Fable estimate
 
-The fallback, drawn with a tilde, when the usage service has no fresh Fable figure.
-`rate_limits` carries no per-model buckets, so the Fable bar is reconstructed from the
-local transcripts under `~/.claude/projects`.
+The fallback, drawn with a tilde, when the usage service has no Fable figure under an
+hour old. `rate_limits` carries no per-model buckets, so the Fable bar is reconstructed
+from the local transcripts under `~/.claude/projects`.
 
 Cost, not token count, is the basis. Raw input+output is under 1% of the tokens
 actually metered (cache reads outnumber it ~100:1), so a token-based estimate tracks
@@ -159,7 +198,7 @@ pending for 10 seconds.
 
 - `hooks/register.tsx`: the hooks (`session.start`, `session.measure`,
   `classic.PostModelSwitch`, `ui.render` on `AbovePrompt`), the scan's cache, the shared
-  usage-service request and the clock push.
+  session readings, the shared usage-service request and its back-off, and the clock push.
 - `hooks/service.ts`: the usage service's URL and the tolerant parser of its answer.
 - `hooks/clock.ts`: the gauges as a 52x16 clock frame, and its request body.
 - `hooks/usage.ts`: the pure parts: choosing what to draw, pace, tiers, the weekly

@@ -9,16 +9,27 @@ export type ServiceWindow = { percentUsed: number; resetsAt?: string }
 /** The usage service's answer, read at `at` (epoch ms); a gauge the answer did not carry is null. */
 export type ServiceReading = { at: number; five: ServiceWindow | null; week: ServiceWindow | null; fable: number | null }
 
+/** The kinds of rate-limit window the sessions share: the 5-hour and the 7-day. */
+export type ReadingKind = 'five_hour' | 'seven_day'
+
+/**
+ * One window as a session read it, and when (epoch ms): `session.measure` stamps the time
+ * it fired; a reading from `session.start` is of unknown age and is stamped 0.
+ */
+export type SharedReading = { at: number; percentUsed: number; resetsAt?: string }
+
+/** The newest reading of each window any session has seen, shared through the store. */
+export type SharedReadings = Partial<Record<ReadingKind, SharedReading>>
+
 export type Snapshot = {
   model: string
-  rateLimits: RateWindow[]
   spend: Spend | null
-  /** Milliseconds since the epoch at the last tick: the pace references and reset clocks read it. */
+  /** Milliseconds since the epoch at the last tick or push: the pace references and reset clocks read it. */
   now: number
   /** The usage service's last reading, shared between sessions through the store; null before one. */
   service: ServiceReading | null
-  /** When `rateLimits` was last set from `session.start` or `session.measure`, by `$.clock.now()`. */
-  rateLimitsAt: number
+  /** The sessions' shared readings, copied from the store before each push; null before the first copy. */
+  readings: SharedReadings | null
 }
 
 declare module 'claude-code' {

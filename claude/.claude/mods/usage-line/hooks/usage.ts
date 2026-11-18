@@ -137,30 +137,48 @@ export type Gauges = {
   isFableExact: boolean
 }
 
-/** How long a usage-service reading may be drawn after it was taken. */
-export const SERVICE_FRESH_MS = 5 * 60_000
+/** How long the usage service's exact Fable figure is drawn; after that, the estimate. */
+export const SERVICE_FABLE_FRESH_MS = 60 * 60_000
+
+type Window = NonNullable<Gauges['five']>
+
+const hasEnded = (w: Window, nowMs: number) => w.resetsAt !== undefined && Date.parse(w.resetsAt) <= nowMs
 
 /**
- * What the band and the clock draw. A service reading younger than SERVICE_FRESH_MS
- * counts: per window, whichever of it and the session's reading is newer wins (a window
- * the session lacks comes from the service), and its Fable figure, when it has one, is
- * exact. Otherwise the session's windows and the Fable estimate, as before the service.
+ * The 5h and 7d windows to draw, from what the sessions share alone, so every session
+ * with the same store draws the same: per window, the newest of the sessions' shared
+ * reading and the usage service's, however old (an old reading beats none). A window
+ * that has ended reads 0% with no reset time, unless another reading is of a later
+ * window: one whose reset is still ahead, which a session start's reading of unknown
+ * age can be.
+ */
+export const chooseWindows = (s: Snapshot): { five: Gauges['five']; week: Gauges['week'] } => {
+  // A snapshot written by an older version of the mod, kept across a hot reload, has no shared fields.
+  const readings = s.readings ?? {}
+  const held = s.service ?? null
+  const service = held !== null && typeof held.at === 'number' ? held : null
+  const pick = (kind: keyof NonNullable<Snapshot['readings']>, fromService: Window | null | undefined): Window | null => {
+    const candidates: { at: number; window: Window }[] = []
+    const r = readings[kind]
+    if (r) candidates.push({ at: r.at, window: r.resetsAt === undefined ? { percentUsed: r.percentUsed } : { percentUsed: r.percentUsed, resetsAt: r.resetsAt } })
+    if (service !== null && fromService) candidates.push({ at: service.at, window: fromService })
+    if (candidates.length === 0) return null
+    candidates.sort((a, b) => b.at - a.at)
+    return candidates.find(c => !hasEnded(c.window, s.now))?.window ?? { percentUsed: 0 }
+  }
+  return { five: pick('five_hour', service?.five), week: pick('seven_day', service?.week) }
+}
+
+/**
+ * What the band and the clock draw: the windows chooseWindows picks, and the service's
+ * Fable figure, exact, while the reading is under SERVICE_FABLE_FRESH_MS old. Otherwise
+ * the Fable estimate, scaled from the 7d window drawn.
  */
 export const chooseGauges = (s: Snapshot, fableShare: number): Gauges => {
-  const session = (kind: string): Gauges['five'] => {
-    const w = s.rateLimits.find(r => r.kind === kind)
-    return w ? { percentUsed: w.percentUsed, resetsAt: w.resetsAt } : null
-  }
-  let five = session('five_hour')
-  let week = session('seven_day')
-  // A snapshot written by an older version of the mod, kept across a hot reload, has no service field.
-  const held = s.service ?? null
-  const service = held !== null && typeof held.at === 'number' && s.now - held.at < SERVICE_FRESH_MS ? held : null
-  if (service !== null) {
-    const isSessionNewer = s.rateLimitsAt > service.at
-    if (five === null || !isSessionNewer) five = service.five
-    if (week === null || !isSessionNewer) week = service.week
-    if (service.fable !== null) return { five, week, fable: Math.round(service.fable), isFableExact: true }
+  const { five, week } = chooseWindows(s)
+  const service = s.service ?? null
+  if (service !== null && typeof service.at === 'number' && typeof service.fable === 'number' && s.now - service.at < SERVICE_FABLE_FRESH_MS) {
+    return { five, week, fable: Math.round(service.fable), isFableExact: true }
   }
   const fable = (week && fablePercent(week.percentUsed, s.spend, fableShare)) || null
   return { five, week, fable, isFableExact: false }
